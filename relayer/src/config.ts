@@ -13,6 +13,18 @@ function parseNumber(value: string | undefined, fallback: number): number {
   return parsed;
 }
 
+function parseHost(value: string | undefined, fallback: string): string {
+  const host = value?.trim();
+  if (!host) return fallback;
+  return host;
+}
+
+function parseCorsOrigin(value: string | undefined, fallback: string): string {
+  const origin = value?.trim();
+  if (!origin) return fallback;
+  return origin;
+}
+
 export function loadConfig(): RelayerConfig {
   const rpcUrl = process.env.RPC_URL?.trim();
   if (!rpcUrl) {
@@ -45,6 +57,14 @@ export function loadConfig(): RelayerConfig {
     process.env.FAILED_REQUESTS_PATH?.trim() || './relayer-data/failed'
   );
 
+  const circuitWasmPath = path.resolve(
+    process.env.CIRCUIT_WASM_PATH?.trim() || '../circuits/build/transaction_js/transaction.wasm'
+  );
+
+  const circuitZkeyPath = path.resolve(
+    process.env.CIRCUIT_ZKEY_PATH?.trim() || '../circuits/transaction_0001.zkey'
+  );
+
   return {
     rpcUrl,
     programId,
@@ -53,6 +73,12 @@ export function loadConfig(): RelayerConfig {
     requestsPath,
     processedRequestsPath,
     failedRequestsPath,
+    circuitWasmPath,
+    circuitZkeyPath,
+    apiEnabled: parseBoolean(process.env.RELAYER_API_ENABLED, true),
+    apiHost: parseHost(process.env.RELAYER_API_HOST, '0.0.0.0'),
+    apiPort: parseNumber(process.env.RELAYER_API_PORT, 8787),
+    apiCorsOrigin: parseCorsOrigin(process.env.RELAYER_API_CORS_ORIGIN, '*'),
     pollIntervalMs: parseNumber(process.env.POLL_INTERVAL_MS, 15_000),
     maxSignatureScan: parseNumber(process.env.MAX_SIGNATURE_SCAN, 200),
     maxKnownSignatures: parseNumber(process.env.MAX_KNOWN_SIGNATURES, 5_000),

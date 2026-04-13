@@ -1,5 +1,7 @@
 import 'dotenv/config';
 import { Connection, PublicKey } from '@solana/web3.js';
+import { Server } from 'node:http';
+import { startApiServer } from './api-server.js';
 import { loadConfig } from './config.js';
 import { processRelayQueue } from './engine.js';
 import { indexDeposits } from './indexer.js';
@@ -23,6 +25,12 @@ async function main(): Promise<void> {
   const store = new StateStore(config.statePath);
   const state: RelayerState = await store.load();
 
+  let apiServer: Server | undefined;
+
+  if (config.apiEnabled) {
+    apiServer = startApiServer(state, config, logger);
+  }
+
   logger.info(
     {
       programId: config.programId,
@@ -31,6 +39,13 @@ async function main(): Promise<void> {
       pollIntervalMs: config.pollIntervalMs,
       statePath: config.statePath,
       requestsPath: config.requestsPath,
+      api: config.apiEnabled
+        ? {
+            host: config.apiHost,
+            port: config.apiPort,
+            corsOrigin: config.apiCorsOrigin,
+          }
+        : null,
       existingJobs: state.jobs.length,
       lastSeenSlot: state.lastSeenSlot,
     },
@@ -84,6 +99,13 @@ async function main(): Promise<void> {
   const shutdown = async (signal: NodeJS.Signals) => {
     clearInterval(timer);
     logger.info({ signal }, 'shutting down relayer');
+
+    if (apiServer) {
+      await new Promise<void>((resolve) => {
+        apiServer?.close(() => resolve());
+      });
+    }
+
     await store.save(state);
     process.exit(0);
   };

@@ -73,6 +73,12 @@ export interface RelayerConfig {
   requestsPath: string;
   processedRequestsPath: string;
   failedRequestsPath: string;
+  circuitWasmPath: string;
+  circuitZkeyPath: string;
+  apiEnabled: boolean;
+  apiHost: string;
+  apiPort: number;
+  apiCorsOrigin: string;
   pollIntervalMs: number;
   maxSignatureScan: number;
   maxKnownSignatures: number;

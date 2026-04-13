@@ -13,6 +13,7 @@ const DEFAULT_RPC =
   'https://solana-mainnet.core.chainstack.com/2cd2b649ac769bded1318e8af2508268';
 const DEFAULT_PROGRAM_ID = 'XmixQ4DB8MtKcEFhyjWs1gZtdaF3YDuF4ieGLJ3xotv';
 const DEFAULT_MINT = 'So11111111111111111111111111111111111111112';
+const DEFAULT_RELAYER_API = 'http://127.0.0.1:8787';
 
 const TOKEN_PROGRAM_ID = new PublicKey(
   'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA'
@@ -43,6 +44,14 @@ const els = {
   connectBtn: document.getElementById('connectBtn'),
   deriveBtn: document.getElementById('deriveBtn'),
   depositBtn: document.getElementById('depositBtn'),
+  relayerApiUrl: document.getElementById('relayerApiUrl'),
+  withdrawRecipient: document.getElementById('withdrawRecipient'),
+  relayerFeeLamports: document.getElementById('relayerFeeLamports'),
+  recipientAmountLamports: document.getElementById('recipientAmountLamports'),
+  fillRecipientBtn: document.getElementById('fillRecipientBtn'),
+  buildWithdrawRequestBtn: document.getElementById('buildWithdrawRequestBtn'),
+  requestIdResult: document.getElementById('requestIdResult'),
+  requestFileResult: document.getElementById('requestFileResult'),
   signature: document.getElementById('signature'),
   solscanLink: document.getElementById('solscanLink'),
   note: document.getElementById('note'),
@@ -61,10 +70,13 @@ function boot() {
   els.rpcUrl.value = DEFAULT_RPC;
   els.programId.value = DEFAULT_PROGRAM_ID;
   els.mint.value = DEFAULT_MINT;
+  els.relayerApiUrl.value = DEFAULT_RELAYER_API;
 
   els.connectBtn.addEventListener('click', onConnectWallet);
   els.deriveBtn.addEventListener('click', onDerivePdas);
   els.depositBtn.addEventListener('click', onDeposit);
+  els.fillRecipientBtn.addEventListener('click', onFillRecipient);
+  els.buildWithdrawRequestBtn.addEventListener('click', onBuildWithdrawRequest);
   els.copyNoteBtn.addEventListener('click', onCopyNote);
   els.downloadNoteBtn.addEventListener('click', onDownloadNote);
 
@@ -90,6 +102,8 @@ function setBusy(isBusy) {
   els.depositBtn.disabled = isBusy;
   els.deriveBtn.disabled = isBusy;
   els.connectBtn.disabled = isBusy;
+  els.fillRecipientBtn.disabled = isBusy;
+  els.buildWithdrawRequestBtn.disabled = isBusy;
 }
 
 async function onConnectWallet() {
@@ -106,6 +120,9 @@ async function onConnectWallet() {
     const sol = Number(bal) / LAMPORTS_PER_SOL;
 
     els.walletStatus.textContent = `${address} | ${sol.toFixed(4)} SOL`;
+    if (!els.withdrawRecipient.value.trim()) {
+      els.withdrawRecipient.value = address;
+    }
     log(`钱包已连接: ${address}`);
   } catch (error) {
     log(error.message ?? String(error), 'error');
@@ -128,21 +145,6 @@ function bytesToHex(bytes) {
   return Array.from(bytes)
     .map((x) => x.toString(16).padStart(2, '0'))
     .join('');
-}
-
-function hexToBytes(hex, expectedLen = 32) {
-  const clean = hex.trim().toLowerCase();
-  if (!/^[0-9a-f]+$/.test(clean)) {
-    throw new Error('hex 格式错误');
-  }
-  if (clean.length !== expectedLen * 2) {
-    throw new Error(`hex 长度错误，期望 ${expectedLen * 2}`);
-  }
-  const out = new Uint8Array(expectedLen);
-  for (let i = 0; i < expectedLen; i++) {
-    out[i] = parseInt(clean.slice(i * 2, i * 2 + 2), 16);
-  }
-  return out;
 }
 
 function random32Bytes() {
@@ -494,6 +496,117 @@ async function onDeposit() {
   }
 }
 
+function onFillRecipient() {
+  try {
+    if (!provider?.publicKey) {
+      throw new Error('请先连接钱包');
+    }
+    els.withdrawRecipient.value = provider.publicKey.toBase58();
+    log('已填入当前钱包地址为 recipient');
+  } catch (error) {
+    log(error.message ?? String(error), 'error');
+  }
+}
+
+function normalizeApiBase(raw) {
+  const value = raw.trim();
+  if (!value) {
+    throw new Error('Relayer API URL 不能为空');
+  }
+  return value.endsWith('/') ? value.slice(0, -1) : value;
+}
+
+function parseNoteJson(raw) {
+  const note = JSON.parse(raw);
+
+  if (!note || typeof note !== 'object') {
+    throw new Error('note JSON 格式错误');
+  }
+
+  const required = ['depositSignature', 'secretHex', 'nullifierHex'];
+  for (const key of required) {
+    if (!note[key] || typeof note[key] !== 'string') {
+      throw new Error(`note 缺少字段: ${key}`);
+    }
+  }
+
+  return {
+    depositSignature: note.depositSignature,
+    secretHex: note.secretHex,
+    nullifierHex: note.nullifierHex,
+  };
+}
+
+async function onBuildWithdrawRequest() {
+  try {
+    setBusy(true);
+
+    const apiBase = normalizeApiBase(els.relayerApiUrl.value);
+    const recipient = els.withdrawRecipient.value.trim();
+    if (!recipient) {
+      throw new Error('Recipient 不能为空');
+    }
+
+    // Validate pubkey format early.
+    new PublicKey(recipient);
+
+    const noteRaw = els.note.value.trim();
+    if (!noteRaw) {
+      throw new Error('请先生成 note 或粘贴 note JSON');
+    }
+
+    const note = parseNoteJson(noteRaw);
+
+    const relayerFeeLamports = els.relayerFeeLamports.value.trim();
+    if (relayerFeeLamports && !/^\d+$/.test(relayerFeeLamports)) {
+      throw new Error('Relayer Fee 必须是整数 lamports');
+    }
+
+    const recipientAmountLamports = els.recipientAmountLamports.value.trim();
+    if (recipientAmountLamports && !/^\d+$/.test(recipientAmountLamports)) {
+      throw new Error('Recipient Amount 必须是整数 lamports');
+    }
+
+    log('向 relayer API 提交提现请求...');
+
+    const res = await fetch(`${apiBase}/api/relay-request/build`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        note,
+        recipient,
+        relayerFeeLamports: relayerFeeLamports || '0',
+        recipientAmountLamports: recipientAmountLamports || undefined,
+      }),
+    });
+
+    let payload = null;
+    try {
+      payload = await res.json();
+    } catch {
+      // keep null
+    }
+
+    if (!res.ok || !payload?.ok) {
+      const errMsg = payload?.error || `HTTP ${res.status}`;
+      throw new Error(`提交失败: ${errMsg}`);
+    }
+
+    els.requestIdResult.value = payload.result.requestId ?? '';
+    els.requestFileResult.value = payload.result.filePath ?? '';
+
+    log(
+      `提现请求已入队: requestId=${payload.result.requestId}, deposit=${payload.result.depositSignature}`
+    );
+  } catch (error) {
+    log(error.message ?? String(error), 'error');
+  } finally {
+    setBusy(false);
+  }
+}
+
 async function onCopyNote() {
   try {
     if (!els.note.value.trim()) {
@@ -538,6 +651,9 @@ window.addEventListener('load', async () => {
       const bal = await connection.getBalance(provider.publicKey, 'confirmed');
       const sol = Number(bal) / LAMPORTS_PER_SOL;
       els.walletStatus.textContent = `${provider.publicKey.toBase58()} | ${sol.toFixed(4)} SOL`;
+      if (!els.withdrawRecipient.value.trim()) {
+        els.withdrawRecipient.value = provider.publicKey.toBase58();
+      }
     }
   } catch {
     // ignore

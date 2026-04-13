@@ -1,6 +1,6 @@
-# x-mix relayer (scaffold)
+# x-mix relayer
 
-This module is the first operational layer for `x-mix` after on-chain deployment.
+This module is the operational off-chain layer for `x-mix` after on-chain deployment.
 
 Current scope:
 - Index `Deposit` activity from chain logs.
@@ -10,7 +10,8 @@ Current scope:
 - Compare rebuilt roots vs latest on-chain `new_root` and flag mismatches.
 - Consume relay request files and execute on-chain `transfer` instructions.
 - Manage relay job lifecycle (`pending -> ready -> relayed/failed`) with retries.
-- Build relay request JSON from note inputs (secret/nullifier) with automatic zk proof generation.
+- Build relay request JSON from note inputs with automatic zk proof generation.
+- Expose HTTP API so DApp can submit withdrawal requests directly.
 
 ## Quick start
 
@@ -37,14 +38,63 @@ The process writes state to `relayer-data/state.json` by default.
 - `DRY_RUN=true` (default):
   - Indexes deposits and queues jobs.
   - Rebuilds and validates Merkle roots.
-  - Reads request files but does not send relay transactions.
+  - Builds request files via API/CLI but does not send relay transactions.
 
 - `DRY_RUN=false`:
   - Executes relay requests by sending `transfer` transactions.
 
-## Build Relay Request from Note
+## HTTP API
 
-You can generate a request file directly from a deposit note without manually producing `proofA/proofB/proofC`.
+When `RELAYER_API_ENABLED=true`, relayer starts an API server.
+
+Default:
+- Host: `0.0.0.0`
+- Port: `8787`
+- CORS: `*`
+
+### `GET /health`
+
+Returns health + queue stats.
+
+### `POST /api/relay-request/build`
+
+Builds proof and writes one request JSON into `REQUESTS_PATH`.
+
+Request body example:
+
+```json
+{
+  "note": {
+    "depositSignature": "...",
+    "secretHex": "...",
+    "nullifierHex": "..."
+  },
+  "recipient": "<recipient-pubkey>",
+  "relayerFeeLamports": "0",
+  "recipientAmountLamports": "7500000000"
+}
+```
+
+Response example:
+
+```json
+{
+  "ok": true,
+  "result": {
+    "requestId": "...",
+    "filePath": ".../relayer-data/requests/<id>.json",
+    "depositSignature": "...",
+    "pool": "...",
+    "mint": "...",
+    "leafIndex": 12,
+    "depositAmountLamports": "7500000000",
+    "relayerFeeLamports": "0",
+    "recipientAmountLamports": "7500000000"
+  }
+}
+```
+
+## Build relay request from CLI
 
 ```bash
 cd relayer
@@ -56,26 +106,15 @@ npm run request:build -- \
   --relayer-fee-lamports 0
 ```
 
-What this does:
-- Loads `state.json` and finds the target deposit.
-- Rebuilds pool Merkle tree and computes proof path.
-- Validates note commitment against on-chain indexed deposit commitment.
-- Generates zk proof using local circuit files.
-- Writes a request JSON into `REQUESTS_PATH`.
-
 Optional flags:
 - `--recipient-amount-lamports` (default: `deposit - relayerFee`)
 - `--request-id`
 - `--wasm-path`
 - `--zkey-path`
 
-Default circuit paths:
-- `../circuits/build/transaction_js/transaction.wasm`
-- `../circuits/transaction_0001.zkey`
-
 ## Relay request format
 
-Drop one JSON file per request in `REQUESTS_PATH`.
+One file per request in `REQUESTS_PATH`.
 
 ```json
 {
@@ -109,9 +148,3 @@ Notes:
 - `knownSignatures`: dedupe window.
 - `jobs`: relay queue records, retry status, decoded deposit payload, relayed signature.
 - `poolSnapshots`: latest on-chain root, rebuilt root, and root-match flag per pool.
-
-## Next implementation steps
-
-1) Add a lightweight HTTP API wrapper for request build + submit.
-2) Validate request values against rebuilt Merkle tree leaf index/proof path.
-3) Add alerting and dead-letter replay tooling.

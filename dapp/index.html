@@ -19,9 +19,9 @@
     <main class="layout">
       <header class="hero panel reveal">
         <p class="eyebrow">X-MIX MAINNET</p>
-        <h1>Deposit Console</h1>
+        <h1>Deposit & Withdraw Console</h1>
         <p class="subtitle">
-          连接钱包后可直接发起 SOL 混币池存款，并自动生成 note（含 secret/nullifier）。
+          连接钱包后可发起 SOL 存款，并直接提交提现请求到 relayer API（不再手工拼 JSON）。
         </p>
       </header>
 
@@ -36,7 +36,7 @@
       </section>
 
       <section class="panel reveal delay-2">
-        <h2>参数</h2>
+        <h2>Deposit 参数</h2>
 
         <div class="grid two">
           <label>
@@ -93,7 +93,49 @@
       </section>
 
       <section class="panel reveal delay-3">
-        <h2>结果</h2>
+        <h2>Withdraw 请求（提交到 Relayer API）</h2>
+
+        <div class="grid two">
+          <label>
+            <span>Relayer API URL</span>
+            <input id="relayerApiUrl" type="text" value="http://127.0.0.1:8787" />
+          </label>
+          <label>
+            <span>Recipient</span>
+            <input id="withdrawRecipient" type="text" placeholder="接收地址" />
+          </label>
+
+          <label>
+            <span>Relayer Fee (lamports)</span>
+            <input id="relayerFeeLamports" type="text" value="0" />
+          </label>
+          <label>
+            <span>Recipient Amount (lamports，可空)</span>
+            <input id="recipientAmountLamports" type="text" placeholder="默认 deposit-fee" />
+          </label>
+        </div>
+
+        <div class="row gap">
+          <button id="fillRecipientBtn" class="btn">使用当前钱包地址</button>
+          <button id="buildWithdrawRequestBtn" class="btn btn-primary">
+            提交提现请求
+          </button>
+        </div>
+
+        <div class="grid two">
+          <label>
+            <span>Request ID</span>
+            <input id="requestIdResult" type="text" readonly />
+          </label>
+          <label>
+            <span>Queue File</span>
+            <input id="requestFileResult" type="text" readonly />
+          </label>
+        </div>
+      </section>
+
+      <section class="panel reveal delay-4">
+        <h2>Note / 交易结果</h2>
 
         <div class="grid two">
           <label>
@@ -107,8 +149,8 @@
         </div>
 
         <label>
-          <span>Note JSON</span>
-          <textarea id="note" rows="12" readonly></textarea>
+          <span>Note JSON（可粘贴已有 note）</span>
+          <textarea id="note" rows="12"></textarea>
         </label>
 
         <div class="row gap">
