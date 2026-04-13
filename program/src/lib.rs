@@ -17,7 +17,7 @@ declare_id!("XmixQ4DB8MtKcEFhyjWs1gZtdaF3YDuF4ieGLJ3xotv");
 security_txt! {
     name: "X Mix Program",
     project_url: "https://github.com/x-mix/x-mix",
-    contacts: "email:security@xmix.io",
+    contacts: "email:openfeel@proton.me",
     policy: "https://github.com/x-mix/x-mix",
     preferred_languages: "en",
     source_code: "https://github.com/x-mix/x-mix"
