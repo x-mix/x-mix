@@ -1,0 +1,13 @@
+.DS_Store
+node_modules/
+target/
+dist/
+*.log
+
+# secrets / local keys
+keys/*.json
+program/keypair.json
+
+# local env
+.env
+.env.*

@@ -1,0 +1,6 @@
+[provider]
+cluster = "localnet"
+wallet = "/www/wwwroot/wallets/public/9527.json"
+
+[programs.localnet]
+x_mix = "XmixQ4DB8MtKcEFhyjWs1gZtdaF3YDuF4ieGLJ3xotv"
