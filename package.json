@@ -26,7 +26,12 @@
     "clients:rust:format": "zx ./scripts/client/format-rust.mjs",
     "clients:rust:lint": "zx ./scripts/client/lint-rust.mjs",
     "clients:rust:publish": "zx ./scripts/client/publish-rust.mjs",
-    "clients:rust:test": "zx ./scripts/client/test-rust.mjs"
+    "clients:rust:test": "zx ./scripts/client/test-rust.mjs",
+    "relayer:dev": "cd relayer && npm run dev",
+    "relayer:build": "cd relayer && npm run build",
+    "relayer:typecheck": "cd relayer && npm run typecheck",
+    "relayer:request": "cd relayer && npm run request:build --",
+    "dapp:serve": "python3 -m http.server 4173 -d dapp"
   },
   "devDependencies": {
     "@codama/nodes-from-anchor": "^1.0.0",
