@@ -12,6 +12,8 @@ pub enum XMixErrorCode {
   InsufficientFunds,
   #[msg("Missing token account")]
   MissingTokenAccount,
+  #[msg("Invalid relayer account")]
+  InvalidRelayerAccount,
   #[msg("Overflow")]
   Overflow,
   #[msg("Underflow")]

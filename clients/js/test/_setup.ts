@@ -1,5 +1,6 @@
 import { getSetComputeUnitLimitInstruction } from '@solana-program/compute-budget';
 import {
+  AccountRole,
   Address,
   airdropFactory,
   appendTransactionMessageInstruction,
@@ -209,7 +210,10 @@ export const depositForAuthority = async (
   secret: Uint8Array;
   nullifier: Uint8Array;
 }> => {
-  const [authority] = await Promise.all([loadDefaultKeypair()]);
+  const [authority, relayer] = await Promise.all([
+    loadDefaultKeypair(),
+    loadRelayerKeypair(),
+  ]);
 
   const { merkleTree, amount, mint, vaultTokenAccount, pool } = ixArgs;
 
@@ -240,9 +244,20 @@ export const depositForAuthority = async (
     vaultTokenAccount,
   });
 
+  const depositIxWithRelayer = {
+    ...depositIx,
+    accounts: [
+      ...depositIx.accounts,
+      {
+        address: relayer.address,
+        role: AccountRole.WRITABLE,
+      },
+    ],
+  } as typeof depositIx;
+
   await pipe(
     await createDefaultTransaction(client, authority),
-    (tx) => appendTransactionMessageInstruction(depositIx, tx),
+    (tx) => appendTransactionMessageInstruction(depositIxWithRelayer, tx),
     (tx) => signAndSendTransaction(client, tx)
   );
 

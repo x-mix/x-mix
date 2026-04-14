@@ -8,6 +8,7 @@ use anchor_spl::{
 
 use crate::constants::MAX_TREE_LEAVES;
 use crate::constants::MIN_SOL_DEPOSIT_AMOUNT;
+use crate::constants::RELAYER_EXECUTION_FEE_LAMPORTS;
 use crate::state::*;
 use crate::utils::error::XMixErrorCode;
 
@@ -46,6 +47,10 @@ pub struct Deposit<'info> {
   pub token_program: Interface<'info, TokenInterface>,
 
   pub associated_token_program: Program<'info, AssociatedToken>,
+
+  /// CHECK: relayer must match pool.authority for SOL deposit subsidy.
+  #[account(mut)]
+  pub relayer: UncheckedAccount<'info>,
 }
 
 impl Deposit<'_> {
@@ -75,10 +80,17 @@ impl Deposit<'_> {
 
     // min amount validation
     match asset_type.unwrap() {
-      AssetType::Sol => require!(
-        amount >= MIN_SOL_DEPOSIT_AMOUNT,
-        XMixErrorCode::DepositTooSmall
-      ),
+      AssetType::Sol => {
+        require!(
+          amount >= MIN_SOL_DEPOSIT_AMOUNT,
+          XMixErrorCode::DepositTooSmall
+        );
+        require_keys_eq!(
+          self.relayer.key(),
+          pool.authority,
+          XMixErrorCode::InvalidRelayerAccount
+        );
+      }
       // 10 tokens regardless of decimals
       AssetType::SplToken => require!(
         amount >= 10u64 * 10u64.pow(self.mint.decimals as u32),
@@ -102,20 +114,29 @@ impl Deposit<'_> {
     commitment: [u8; 32],
     new_root: [u8; 32],
   ) -> Result<()> {
-    let mut pool = ctx.accounts.pool.load_mut()?;
-
     // NOTE: safe to unwrap since we checked this in validate
-    let asset_type = AssetType::from_u8(pool.asset_type).unwrap();
+    let asset_type = {
+      let pool = ctx.accounts.pool.load()?;
+      AssetType::from_u8(pool.asset_type).unwrap()
+    };
 
     // Transfer funds to vault
     match asset_type {
       AssetType::Sol => {
+        // Charge user-paid relayer subsidy first.
+        let relayer_fee_accounts = system_program::Transfer {
+          from: ctx.accounts.depositor.to_account_info(),
+          to: ctx.accounts.relayer.to_account_info(),
+        };
+        let cpi_program = ctx.accounts.system_program.to_account_info();
+        let cpi_context = CpiContext::new(cpi_program.clone(), relayer_fee_accounts);
+        system_program::transfer(cpi_context, RELAYER_EXECUTION_FEE_LAMPORTS)?;
+
         let cpi_accounts = system_program::Transfer {
           from: ctx.accounts.depositor.to_account_info(),
           to: ctx.accounts.vault.to_account_info(),
         };
 
-        let cpi_program = ctx.accounts.system_program.to_account_info();
         let cpi_context = CpiContext::new(cpi_program, cpi_accounts);
 
         system_program::transfer(cpi_context, amount)?;
@@ -144,6 +165,8 @@ impl Deposit<'_> {
         token_interface::transfer_checked(cpi_context, amount, mint.decimals)?;
       }
     }
+
+    let mut pool = ctx.accounts.pool.load_mut()?;
 
     // Emit commitment event (users will build Merkle tree from events)
     let leaf_index = pool.next_leaf_index;
