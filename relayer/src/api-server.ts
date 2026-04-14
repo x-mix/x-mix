@@ -6,10 +6,12 @@ import { RelayerConfig, RelayerState } from './types.js';
 interface RelayRequestBuildBody {
   note?: {
     depositSignature?: string;
+    depositInstructionIndex?: number;
     secretHex?: string;
     nullifierHex?: string;
   };
   depositSignature?: string;
+  depositInstructionIndex?: number;
   secretHex?: string;
   nullifierHex?: string;
   recipient?: string;
@@ -109,6 +111,8 @@ export function startApiServer(
 
         const note = body.note ?? {};
         const depositSignature = body.depositSignature ?? note.depositSignature;
+        const depositInstructionIndex =
+          body.depositInstructionIndex ?? note.depositInstructionIndex;
         const secretHex = body.secretHex ?? note.secretHex;
         const nullifierHex = body.nullifierHex ?? note.nullifierHex;
 
@@ -135,6 +139,7 @@ export function startApiServer(
           state,
           config,
           depositSignature,
+          depositInstructionIndex,
           recipient: body.recipient,
           secretHex,
           nullifierHex,
@@ -153,6 +158,7 @@ export function startApiServer(
               requestId: result.requestId,
               filePath: result.filePath,
               depositSignature,
+              depositInstructionIndex: result.request.depositInstructionIndex,
               pool: result.pool,
               mint: result.mint,
               leafIndex: result.leafIndex,
@@ -168,6 +174,7 @@ export function startApiServer(
           {
             requestId: result.requestId,
             depositSignature,
+            depositInstructionIndex: result.request.depositInstructionIndex,
             pool: result.pool,
             recipient: body.recipient,
           },

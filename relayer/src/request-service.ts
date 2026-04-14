@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { Keypair, PublicKey } from '@solana/web3.js';
+import { getDepositRefKey } from './deposit-key.js';
 import {
   buildPoolMerkleContext,
   bytesToHex,
@@ -14,6 +15,7 @@ export interface BuildRelayRequestParams {
   state: RelayerState;
   config: RelayerConfig;
   depositSignature: string;
+  depositInstructionIndex?: number;
   recipient: string;
   secretHex: string;
   nullifierHex: string;
@@ -42,6 +44,14 @@ function parseLamports(raw: string, name: string): bigint {
   return BigInt(raw);
 }
 
+function parseInstructionIndex(raw: number | undefined): number | undefined {
+  if (raw === undefined) return undefined;
+  if (!Number.isInteger(raw) || raw < 0) {
+    throw new Error('depositInstructionIndex must be a non-negative integer');
+  }
+  return raw;
+}
+
 async function loadKeypairFromFile(filePath: string): Promise<Keypair> {
   const raw = await fs.readFile(path.resolve(filePath), 'utf8');
   const secret = JSON.parse(raw) as number[];
@@ -62,6 +72,7 @@ export async function buildRelayRequestFromState(
     state,
     config,
     depositSignature,
+    depositInstructionIndex,
     recipient,
     secretHex,
     nullifierHex,
@@ -74,21 +85,35 @@ export async function buildRelayRequestFromState(
   } = params;
 
   const recipientPk = new PublicKey(recipient);
+  const instructionIndex = parseInstructionIndex(depositInstructionIndex);
 
-  const targetJob = state.jobs.find(
+  const candidateJobs = state.jobs.filter(
     (job) => job.signature === depositSignature && job.deposit
   );
 
-  if (!targetJob || !targetJob.deposit) {
-    throw new Error(`Deposit not found in relayer state: ${depositSignature}`);
+  let targetJob: (typeof candidateJobs)[number] | undefined = candidateJobs[0];
+  if (instructionIndex !== undefined) {
+    targetJob = candidateJobs.find((job) => job.deposit!.instructionIndex === instructionIndex);
+  } else if (candidateJobs.length > 1) {
+    throw new Error(
+      `Multiple deposits found for signature ${depositSignature}; provide depositInstructionIndex`
+    );
   }
 
+  if (!targetJob || !targetJob.deposit) {
+    throw new Error(
+      `Deposit not found in relayer state: ${getDepositRefKey(depositSignature, instructionIndex)}`
+    );
+  }
+
+  const targetInstructionIndex = targetJob.deposit.instructionIndex;
   const pool = new PublicKey(targetJob.deposit.pool);
 
   const poolJobs = state.jobs.filter((job) => job.deposit?.pool === targetJob.deposit!.pool);
   const { targetLeafIndex, root, pathElements, pathIndices } = await buildPoolMerkleContext(
     poolJobs,
-    depositSignature
+    depositSignature,
+    targetInstructionIndex
   );
 
   const secret = hexToBytes(secretHex, 32);
@@ -149,6 +174,7 @@ export async function buildRelayRequestFromState(
 
   const request: RelayRequestInput = {
     depositSignature,
+    depositInstructionIndex: targetInstructionIndex,
     recipient: recipientPk.toBase58(),
     nullifierHashHex: bytesToHex(proof.nullifierHash),
     proofAHex: bytesToHex(proof.proofA),
@@ -162,7 +188,9 @@ export async function buildRelayRequestFromState(
     vault: targetJob.deposit.vault,
   };
 
-  const requestIdResolved = requestId ?? `${depositSignature.slice(0, 16)}-${Date.now()}`;
+  const requestIdResolved =
+    requestId ??
+    `${depositSignature.slice(0, 16)}-ix${targetInstructionIndex}-${Date.now()}`;
   let filePath: string | undefined;
 
   if (writeToQueue) {

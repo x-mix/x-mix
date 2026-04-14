@@ -5,8 +5,9 @@ import {
   PublicKey,
 } from '@solana/web3.js';
 import { Logger } from 'pino';
+import { getDepositJobKey, getDepositRefKey } from './deposit-key.js';
 import { decodeDepositInstruction } from './deposit-decoder.js';
-import { DepositJob, RelayerConfig, RelayerState } from './types.js';
+import { DepositJob, DepositPayload, RelayerConfig, RelayerState } from './types.js';
 
 function isDepositLog(logs: string[] | null | undefined): boolean {
   if (!logs || logs.length === 0) return false;
@@ -19,7 +20,12 @@ function isPartiallyDecodedInstruction(
   return 'data' in ix;
 }
 
-function makeJob(signature: string, slot: number, blockTime: number | null): DepositJob {
+function makeJob(
+  signature: string,
+  slot: number,
+  blockTime: number | null,
+  deposit: DepositPayload
+): DepositJob {
   return {
     signature,
     slot,
@@ -27,6 +33,7 @@ function makeJob(signature: string, slot: number, blockTime: number | null): Dep
     detectedAt: new Date().toISOString(),
     status: 'pending',
     attempts: 0,
+    deposit,
   };
 }
 
@@ -62,7 +69,7 @@ export async function indexDeposits(
   signatures.sort((a, b) => a.slot - b.slot);
 
   const known = new Set(state.knownSignatures);
-  const existingJobs = new Set(state.jobs.map((job) => job.signature));
+  const existingJobs = new Set(state.jobs.map((job) => getDepositJobKey(job)));
 
   let indexed = 0;
 
@@ -88,12 +95,7 @@ export async function indexDeposits(
       continue;
     }
 
-    if (existingJobs.has(sigInfo.signature)) {
-      continue;
-    }
-
-    const job = makeJob(sigInfo.signature, sigInfo.slot, sigInfo.blockTime ?? null);
-
+    const decodedDeposits: DepositPayload[] = [];
     for (let i = 0; i < tx.transaction.message.instructions.length; i++) {
       const ix = tx.transaction.message.instructions[i];
       if (!isPartiallyDecodedInstruction(ix)) {
@@ -109,11 +111,10 @@ export async function indexDeposits(
         continue;
       }
 
-      job.deposit = decoded;
-      break;
+      decodedDeposits.push(decoded);
     }
 
-    if (!job.deposit) {
+    if (decodedDeposits.length === 0) {
       // Keep this trace so we can inspect edge cases where logs say deposit
       // but the instruction payload could not be decoded.
       logger.warn(
@@ -123,23 +124,33 @@ export async function indexDeposits(
       continue;
     }
 
-    state.jobs.push(job);
-    existingJobs.add(sigInfo.signature);
-    updatePoolSnapshot(state, job);
-    indexed += 1;
+    for (const decoded of decodedDeposits) {
+      const depositKey = getDepositRefKey(sigInfo.signature, decoded.instructionIndex);
+      if (existingJobs.has(depositKey)) {
+        continue;
+      }
 
-    logger.info(
-      {
-        signature: sigInfo.signature,
-        slot: sigInfo.slot,
-        blockTime: sigInfo.blockTime,
-        pool: job.deposit.pool,
-        mint: job.deposit.mint,
-        amount: job.deposit.amount,
-        root: job.deposit.newRootHex,
-      },
-      'Indexed deposit transaction'
-    );
+      const job = makeJob(sigInfo.signature, sigInfo.slot, sigInfo.blockTime ?? null, decoded);
+      state.jobs.push(job);
+      existingJobs.add(depositKey);
+      updatePoolSnapshot(state, job);
+      indexed += 1;
+
+      logger.info(
+        {
+          signature: sigInfo.signature,
+          depositKey,
+          instructionIndex: decoded.instructionIndex,
+          slot: sigInfo.slot,
+          blockTime: sigInfo.blockTime,
+          pool: decoded.pool,
+          mint: decoded.mint,
+          amount: decoded.amount,
+          root: decoded.newRootHex,
+        },
+        'Indexed deposit transaction'
+      );
+    }
   }
 
   state.knownSignatures = Array.from(known).slice(-config.maxKnownSignatures);

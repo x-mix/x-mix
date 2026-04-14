@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { Logger } from 'pino';
+import { getRelayRequestKey } from './deposit-key.js';
 import { RelayerConfig, RelayRequest, RelayRequestInput } from './types.js';
 
 function isHexOfLen(value: string, byteLen: number): boolean {
@@ -11,6 +12,12 @@ function isHexOfLen(value: string, byteLen: number): boolean {
 
 function validateInput(input: RelayRequestInput): string | null {
   if (!input.depositSignature) return 'missing depositSignature';
+  if (
+    input.depositInstructionIndex !== undefined &&
+    (!Number.isInteger(input.depositInstructionIndex) || input.depositInstructionIndex < 0)
+  ) {
+    return 'invalid depositInstructionIndex';
+  }
   if (!input.recipient) return 'missing recipient';
   if (!isHexOfLen(input.nullifierHashHex, 32)) return 'invalid nullifierHashHex';
   if (!isHexOfLen(input.proofAHex, 64)) return 'invalid proofAHex';
@@ -53,7 +60,7 @@ export async function loadRelayRequests(
       }
 
       const requestId = path.basename(file, '.json');
-      requests.set(input.depositSignature, {
+      requests.set(getRelayRequestKey(input), {
         requestId,
         filePath,
         input,

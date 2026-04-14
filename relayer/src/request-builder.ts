@@ -6,6 +6,7 @@ import { StateStore } from './store.js';
 
 type CliArgs = {
   depositSignature?: string;
+  depositInstructionIndex?: number;
   recipient?: string;
   secretHex?: string;
   nullifierHex?: string;
@@ -32,6 +33,9 @@ function parseArgs(argv: string[]): CliArgs {
     switch (key) {
       case 'deposit-signature':
         out.depositSignature = value;
+        break;
+      case 'deposit-instruction-index':
+        out.depositInstructionIndex = Number(value);
         break;
       case 'recipient':
         out.recipient = value;
@@ -91,6 +95,7 @@ async function main(): Promise<void> {
     state,
     config,
     depositSignature,
+    depositInstructionIndex: args.depositInstructionIndex,
     recipient: recipientRaw,
     secretHex,
     nullifierHex,
@@ -105,6 +110,9 @@ async function main(): Promise<void> {
   console.log('relay request written:', result.filePath ?? '(no file)');
   console.log('request id:', result.requestId);
   console.log('deposit signature:', depositSignature);
+  if (result.request.depositInstructionIndex !== undefined) {
+    console.log('deposit instruction index:', result.request.depositInstructionIndex);
+  }
   console.log('pool:', result.pool);
   console.log('leaf index:', result.leafIndex);
   console.log('relayer fee:', result.request.relayerFeeLamports);

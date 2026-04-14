@@ -1,5 +1,6 @@
 import { Connection } from '@solana/web3.js';
 import { Logger } from 'pino';
+import { getDepositJobKey } from './deposit-key.js';
 import { loadRelayRequests, markRequestFailed, markRequestProcessed } from './relay-requests.js';
 import { deriveFallbackVault, executeTransfer } from './transfer-executor.js';
 import { DepositJob, RelayerConfig, RelayerState } from './types.js';
@@ -24,7 +25,7 @@ export async function processRelayQueue(
       job.status = 'ready';
     }
 
-    const request = requests.get(job.signature);
+    const request = requests.get(getDepositJobKey(job)) ?? requests.get(job.signature);
     if (!request) {
       continue;
     }
@@ -41,6 +42,7 @@ export async function processRelayQueue(
       logger.info(
         {
           signature: job.signature,
+          instructionIndex: job.deposit?.instructionIndex,
           requestId: request.requestId,
           recipient: request.input.recipient,
           amount: request.input.recipientAmountLamports,
@@ -78,6 +80,7 @@ export async function processRelayQueue(
       logger.info(
         {
           depositSignature: job.signature,
+          depositInstructionIndex: job.deposit?.instructionIndex,
           relayedSignature: relayedSig,
           requestId: request.requestId,
         },

@@ -154,7 +154,8 @@ function sortDepositJobs(jobs: DepositJob[]): DepositJob[] {
 
 export async function buildPoolMerkleContext(
   jobs: DepositJob[],
-  targetDepositSignature: string
+  targetDepositSignature: string,
+  targetInstructionIndex?: number
 ): Promise<{
   orderedJobs: DepositJob[];
   targetLeafIndex: number;
@@ -177,9 +178,17 @@ export async function buildPoolMerkleContext(
     tree.insert(commitment);
   }
 
-  const targetLeafIndex = orderedJobs.findIndex((j) => j.signature === targetDepositSignature);
+  const targetLeafIndex = orderedJobs.findIndex((j) => {
+    if (j.signature !== targetDepositSignature) return false;
+    if (targetInstructionIndex === undefined) return true;
+    return j.deposit?.instructionIndex === targetInstructionIndex;
+  });
   if (targetLeafIndex < 0) {
-    throw new Error(`Target deposit signature not found in pool history: ${targetDepositSignature}`);
+    throw new Error(
+      `Target deposit not found in pool history: ${targetDepositSignature}${
+        targetInstructionIndex === undefined ? '' : `:${targetInstructionIndex}`
+      }`
+    );
   }
 
   const root = await tree.root();

@@ -35,6 +35,7 @@ export interface PoolSnapshot {
 
 export interface RelayRequestInput {
   depositSignature: string;
+  depositInstructionIndex?: number;
   recipient: string;
   nullifierHashHex: string;
   proofAHex: string;
