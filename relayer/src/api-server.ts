@@ -1,8 +1,9 @@
 import http, { IncomingMessage, ServerResponse } from 'node:http';
 import { PublicKey } from '@solana/web3.js';
 import { Logger } from 'pino';
+import { ensureDepositHistory, listPoolDeposits } from './deposit-history.js';
 import { buildRelayRequestFromState } from './request-service.js';
-import { DepositJob, RelayerConfig, RelayerState } from './types.js';
+import { RelayerConfig, RelayerState } from './types.js';
 
 interface RelayRequestBuildBody {
   note?: {
@@ -74,18 +75,6 @@ function getQueueStats(state: RelayerState): {
   };
 }
 
-function sortDepositJobs(jobs: DepositJob[]): DepositJob[] {
-  return [...jobs].sort((a, b) => {
-    if (a.slot !== b.slot) return a.slot - b.slot;
-
-    const aIdx = a.deposit?.instructionIndex ?? 0;
-    const bIdx = b.deposit?.instructionIndex ?? 0;
-    if (aIdx !== bIdx) return aIdx - bIdx;
-
-    return a.signature.localeCompare(b.signature);
-  });
-}
-
 function getPoolCommitments(
   state: RelayerState,
   pool: string,
@@ -100,9 +89,9 @@ function getPoolCommitments(
   lastSeenSlot: number;
   stateUpdatedAt: string;
 } {
-  const poolJobs = state.jobs.filter((job) => job.deposit?.pool === pool);
-  const ordered = sortDepositJobs(poolJobs);
-  const all = ordered.map((job) => job.deposit!.commitmentHex);
+  ensureDepositHistory(state);
+  const ordered = listPoolDeposits(state, pool);
+  const all = ordered.map((entry) => entry.commitmentHex);
 
   const bounded =
     typeof limit === 'number' && Number.isInteger(limit) && limit > 0 && all.length > limit

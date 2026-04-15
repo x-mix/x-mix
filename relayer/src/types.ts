@@ -11,6 +11,12 @@ export interface DepositPayload {
   instructionIndex: number;
 }
 
+export interface DepositHistoryEntry extends DepositPayload {
+  signature: string;
+  slot: number;
+  blockTime: number | null;
+}
+
 export interface DepositJob {
   signature: string;
   slot: number;
@@ -62,6 +68,8 @@ export interface RelayerState {
   lastSeenSlot: number;
   knownSignatures: string[];
   jobs: DepositJob[];
+  depositHistoryByRef: Record<string, DepositHistoryEntry>;
+  poolDepositOrder: Record<string, string[]>;
   poolSnapshots: Record<string, PoolSnapshot>;
   updatedAt: string;
 }
@@ -81,9 +89,12 @@ export interface RelayerConfig {
   apiPort: number;
   apiCorsOrigin: string;
   pollIntervalMs: number;
+  fallbackPollEveryTicks: number;
+  logSubscriptionEnabled: boolean;
   maxSignatureScan: number;
   maxKnownSignatures: number;
   maxRelayRetries: number;
+  maxFailedJobsRetained: number;
   dryRun: boolean;
   statePath: string;
 }

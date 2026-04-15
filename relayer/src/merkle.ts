@@ -1,6 +1,7 @@
 import { buildPoseidon } from 'circomlibjs';
 import { Logger } from 'pino';
-import { DepositJob, RelayerState } from './types.js';
+import { ensureDepositHistory, listPoolDeposits } from './deposit-history.js';
+import { RelayerState } from './types.js';
 
 const TREE_LEVELS = 20;
 const SNARK_FIELD_SIZE = BigInt(
@@ -89,49 +90,40 @@ async function computeMerkleRoot(commitments: Uint8Array[]): Promise<Uint8Array>
   return currentLevel[0];
 }
 
-function sortDepositJobs(jobs: DepositJob[]): DepositJob[] {
-  return [...jobs].sort((a, b) => {
-    if (a.slot !== b.slot) return a.slot - b.slot;
-
-    const aIdx = a.deposit?.instructionIndex ?? 0;
-    const bIdx = b.deposit?.instructionIndex ?? 0;
-    if (aIdx !== bIdx) return aIdx - bIdx;
-
-    return a.signature.localeCompare(b.signature);
-  });
-}
-
 export async function rebuildMerkleSnapshots(
   state: RelayerState,
   logger: Logger
 ): Promise<{ pools: number; matches: number; mismatches: number }> {
-  const byPool = new Map<string, DepositJob[]>();
-
-  for (const job of state.jobs) {
-    if (!job.deposit) continue;
-    const arr = byPool.get(job.deposit.pool) ?? [];
-    arr.push(job);
-    byPool.set(job.deposit.pool, arr);
-  }
+  ensureDepositHistory(state);
+  const pools = Object.keys(state.poolDepositOrder);
 
   let matches = 0;
   let mismatches = 0;
 
-  for (const [pool, jobs] of byPool.entries()) {
-    const ordered = sortDepositJobs(jobs);
-    const commitments = ordered.map((j) => hexToBytes(j.deposit!.commitmentHex));
+  for (const pool of pools) {
+    const deposits = listPoolDeposits(state, pool);
+    if (deposits.length === 0) continue;
+    const commitments = deposits.map((d) => hexToBytes(d.commitmentHex));
 
     const computedRoot = await computeMerkleRoot(commitments);
     const computedRootHex = bytesToHex(computedRoot);
-    const latestOnChainRootHex = ordered[ordered.length - 1].deposit!.newRootHex;
+    const latestOnChainRootHex = deposits[deposits.length - 1].newRootHex;
     const rootMatches = computedRootHex === latestOnChainRootHex;
 
-    const snapshot = state.poolSnapshots[pool];
-    if (snapshot) {
-      snapshot.computedRootHex = computedRootHex;
-      snapshot.rootMatches = rootMatches;
-      snapshot.updatedAt = new Date().toISOString();
-    }
+    const snapshot = state.poolSnapshots[pool] ?? {
+      mint: deposits[deposits.length - 1].mint,
+      latestRootHex: latestOnChainRootHex,
+      commitmentCount: deposits.length,
+      lastDepositSignature: deposits[deposits.length - 1].signature,
+      updatedAt: new Date().toISOString(),
+    };
+    snapshot.computedRootHex = computedRootHex;
+    snapshot.rootMatches = rootMatches;
+    snapshot.latestRootHex = latestOnChainRootHex;
+    snapshot.commitmentCount = deposits.length;
+    snapshot.lastDepositSignature = deposits[deposits.length - 1].signature;
+    snapshot.updatedAt = new Date().toISOString();
+    state.poolSnapshots[pool] = snapshot;
 
     if (rootMatches) {
       matches += 1;
@@ -150,7 +142,7 @@ export async function rebuildMerkleSnapshots(
   }
 
   return {
-    pools: byPool.size,
+    pools: pools.length,
     matches,
     mismatches,
   };

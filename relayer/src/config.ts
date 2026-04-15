@@ -80,9 +80,12 @@ export function loadConfig(): RelayerConfig {
     apiPort: parseNumber(process.env.RELAYER_API_PORT, 8787),
     apiCorsOrigin: parseCorsOrigin(process.env.RELAYER_API_CORS_ORIGIN, '*'),
     pollIntervalMs: parseNumber(process.env.POLL_INTERVAL_MS, 4_000),
+    fallbackPollEveryTicks: parseNumber(process.env.FALLBACK_POLL_EVERY_TICKS, 3),
+    logSubscriptionEnabled: parseBoolean(process.env.LOG_SUBSCRIPTION_ENABLED, true),
     maxSignatureScan: parseNumber(process.env.MAX_SIGNATURE_SCAN, 200),
     maxKnownSignatures: parseNumber(process.env.MAX_KNOWN_SIGNATURES, 5_000),
     maxRelayRetries: parseNumber(process.env.MAX_RELAY_RETRIES, 3),
+    maxFailedJobsRetained: parseNumber(process.env.MAX_FAILED_JOBS_RETAINED, 200),
     dryRun: parseBoolean(process.env.DRY_RUN, true),
     statePath,
   };

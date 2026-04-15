@@ -3,8 +3,9 @@ import { Connection, PublicKey } from '@solana/web3.js';
 import { Server } from 'node:http';
 import { startApiServer } from './api-server.js';
 import { loadConfig } from './config.js';
+import { compactQueueJobs, ensureDepositHistory } from './deposit-history.js';
 import { processRelayQueue } from './engine.js';
-import { indexDeposits } from './indexer.js';
+import { indexDeposits, indexDepositsBySignatures } from './indexer.js';
 import { logger } from './logger.js';
 import { rebuildMerkleSnapshots } from './merkle.js';
 import { StateStore } from './store.js';
@@ -24,8 +25,27 @@ async function main(): Promise<void> {
 
   const store = new StateStore(config.statePath);
   const state: RelayerState = await store.load();
+  ensureDepositHistory(state);
 
   let apiServer: Server | undefined;
+  let logSubscriptionId: number | undefined;
+  const liveSignatures = new Set<string>();
+  let tickCount = 0;
+
+  const programId = new PublicKey(config.programId);
+  if (config.logSubscriptionEnabled) {
+    logSubscriptionId = connection.onLogs(
+      programId,
+      (event) => {
+        if (event.err) return;
+        if (!event.logs.some((line) => line.includes('Instruction: Deposit'))) return;
+        if (event.signature) {
+          liveSignatures.add(event.signature);
+        }
+      },
+      'confirmed'
+    );
+  }
 
   if (config.apiEnabled) {
     apiServer = startApiServer(state, config, logger);
@@ -47,13 +67,16 @@ async function main(): Promise<void> {
           }
         : null,
       existingJobs: state.jobs.length,
+      depositHistoryCount: Object.keys(state.depositHistoryByRef).length,
       lastSeenSlot: state.lastSeenSlot,
+      logSubscriptionEnabled: config.logSubscriptionEnabled,
+      fallbackPollEveryTicks: config.fallbackPollEveryTicks,
     },
     'x-mix relayer started'
   );
 
   let ticking = false;
-  let lastMerkleJobCount = -1;
+  let lastMerkleHistoryCount = -1;
   let lastMerkleSummary = {
     pools: 0,
     matches: 0,
@@ -65,16 +88,34 @@ async function main(): Promise<void> {
     ticking = true;
 
     try {
-      const indexed = await indexDeposits(connection, config, state, logger);
-      const processed = await processRelayQueue(connection, state, config, logger);
+      const liveBatch = Array.from(liveSignatures);
+      liveSignatures.clear();
 
-      const shouldRebuildMerkle = indexed > 0 || state.jobs.length !== lastMerkleJobCount;
+      const indexedFromLive = await indexDepositsBySignatures(
+        connection,
+        config,
+        state,
+        logger,
+        liveBatch
+      );
+      const shouldPollFallback =
+        config.fallbackPollEveryTicks <= 1 || tickCount % config.fallbackPollEveryTicks === 0;
+      const indexedFromPoll = shouldPollFallback
+        ? await indexDeposits(connection, config, state, logger)
+        : 0;
+      const indexed = indexedFromLive + indexedFromPoll;
+
+      const processed = await processRelayQueue(connection, state, config, logger);
+      compactQueueJobs(state, config.maxFailedJobsRetained);
+
+      const historyCount = Object.keys(state.depositHistoryByRef).length;
+      const shouldRebuildMerkle = indexed > 0 || historyCount !== lastMerkleHistoryCount;
       const merkle = shouldRebuildMerkle
         ? await rebuildMerkleSnapshots(state, logger)
         : lastMerkleSummary;
 
       if (shouldRebuildMerkle) {
-        lastMerkleJobCount = state.jobs.length;
+        lastMerkleHistoryCount = historyCount;
         lastMerkleSummary = merkle;
       }
 
@@ -83,6 +124,9 @@ async function main(): Promise<void> {
       logger.info(
         {
           indexed,
+          indexedFromLive,
+          indexedFromPoll,
+          polledThisTick: shouldPollFallback,
           processed,
           queue: {
             pending: state.jobs.filter((j) => j.status === 'pending').length,
@@ -90,6 +134,7 @@ async function main(): Promise<void> {
             relayed: state.jobs.filter((j) => j.status === 'relayed').length,
             failed: state.jobs.filter((j) => j.status === 'failed').length,
           },
+          depositHistoryCount: historyCount,
           trackedPools: Object.keys(state.poolSnapshots).length,
           merkle,
           merkleRebuilt: shouldRebuildMerkle,
@@ -97,6 +142,7 @@ async function main(): Promise<void> {
         },
         'relayer tick completed'
       );
+      tickCount += 1;
     } catch (error) {
       logger.error(
         { error: error instanceof Error ? error.stack : String(error) },
@@ -120,6 +166,13 @@ async function main(): Promise<void> {
       await new Promise<void>((resolve) => {
         apiServer?.close(() => resolve());
       });
+    }
+    if (logSubscriptionId !== undefined) {
+      try {
+        await connection.removeOnLogsListener(logSubscriptionId);
+      } catch {
+        // ignore
+      }
     }
 
     await store.save(state);

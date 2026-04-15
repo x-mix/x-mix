@@ -1,6 +1,12 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { Keypair, PublicKey } from '@solana/web3.js';
+import {
+  ensureDepositHistory,
+  findDepositByRef,
+  findDepositsBySignature,
+  listPoolDeposits,
+} from './deposit-history.js';
 import { getDepositRefKey } from './deposit-key.js';
 import {
   buildPoolMerkleContext,
@@ -9,7 +15,7 @@ import {
   generateTransferProof,
   hexToBytes,
 } from './proof-builder.js';
-import { RelayRequestInput, RelayerConfig, RelayerState } from './types.js';
+import { DepositJob, RelayRequestInput, RelayerConfig, RelayerState } from './types.js';
 
 export interface BuildRelayRequestParams {
   state: RelayerState;
@@ -86,30 +92,43 @@ export async function buildRelayRequestFromState(
 
   const recipientPk = new PublicKey(recipient);
   const instructionIndex = parseInstructionIndex(depositInstructionIndex);
+  ensureDepositHistory(state);
 
-  const candidateJobs = state.jobs.filter(
-    (job) => job.signature === depositSignature && job.deposit
-  );
-
-  let targetJob: (typeof candidateJobs)[number] | undefined = candidateJobs[0];
-  if (instructionIndex !== undefined) {
-    targetJob = candidateJobs.find((job) => job.deposit!.instructionIndex === instructionIndex);
-  } else if (candidateJobs.length > 1) {
+  const candidateDeposits = findDepositsBySignature(state, depositSignature);
+  let targetDeposit = findDepositByRef(state, depositSignature, instructionIndex);
+  if (instructionIndex === undefined && candidateDeposits.length > 1) {
     throw new Error(
       `Multiple deposits found for signature ${depositSignature}; provide depositInstructionIndex`
     );
   }
 
-  if (!targetJob || !targetJob.deposit) {
+  if (!targetDeposit) {
     throw new Error(
       `Deposit not found in relayer state: ${getDepositRefKey(depositSignature, instructionIndex)}`
     );
   }
 
-  const targetInstructionIndex = targetJob.deposit.instructionIndex;
-  const pool = new PublicKey(targetJob.deposit.pool);
+  const targetInstructionIndex = targetDeposit.instructionIndex;
+  const pool = new PublicKey(targetDeposit.pool);
 
-  const poolJobs = state.jobs.filter((job) => job.deposit?.pool === targetJob.deposit!.pool);
+  const poolJobs: DepositJob[] = listPoolDeposits(state, targetDeposit.pool).map((d) => ({
+    signature: d.signature,
+    slot: d.slot,
+    blockTime: d.blockTime,
+    detectedAt: '',
+    status: 'ignored',
+    attempts: 0,
+    deposit: {
+      depositor: d.depositor,
+      pool: d.pool,
+      mint: d.mint,
+      vault: d.vault,
+      amount: d.amount,
+      commitmentHex: d.commitmentHex,
+      newRootHex: d.newRootHex,
+      instructionIndex: d.instructionIndex,
+    },
+  }));
   const { targetLeafIndex, root, pathElements, pathIndices } = await buildPoolMerkleContext(
     poolJobs,
     depositSignature,
@@ -119,13 +138,13 @@ export async function buildRelayRequestFromState(
   const secret = hexToBytes(secretHex, 32);
   const nullifier = hexToBytes(nullifierHex, 32);
 
-  const amount = BigInt(targetJob.deposit.amount);
+  const amount = BigInt(targetDeposit.amount);
   const computedCommitment = await generateCommitment(secret, nullifier, amount, pool);
   const computedCommitmentHex = bytesToHex(computedCommitment);
 
-  if (computedCommitmentHex !== targetJob.deposit.commitmentHex) {
+  if (computedCommitmentHex !== targetDeposit.commitmentHex) {
     throw new Error(
-      `Note commitment mismatch. expected=${targetJob.deposit.commitmentHex} got=${computedCommitmentHex}`
+      `Note commitment mismatch. expected=${targetDeposit.commitmentHex} got=${computedCommitmentHex}`
     );
   }
 
@@ -183,9 +202,9 @@ export async function buildRelayRequestFromState(
     publicInputsHex: proof.publicInputs.map(bytesToHex),
     relayerFeeLamports: fee.toString(),
     recipientAmountLamports: recipientAmount.toString(),
-    pool: targetJob.deposit.pool,
-    mint: targetJob.deposit.mint,
-    vault: targetJob.deposit.vault,
+    pool: targetDeposit.pool,
+    mint: targetDeposit.mint,
+    vault: targetDeposit.vault,
   };
 
   const requestIdResolved =
@@ -203,8 +222,8 @@ export async function buildRelayRequestFromState(
     requestId: requestIdResolved,
     filePath,
     request,
-    pool: targetJob.deposit.pool,
-    mint: targetJob.deposit.mint,
+    pool: targetDeposit.pool,
+    mint: targetDeposit.mint,
     leafIndex: targetLeafIndex,
     depositAmountLamports: amount.toString(),
   };

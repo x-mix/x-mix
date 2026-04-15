@@ -7,6 +7,8 @@ function createDefaultState(): RelayerState {
     lastSeenSlot: 0,
     knownSignatures: [],
     jobs: [],
+    depositHistoryByRef: {},
+    poolDepositOrder: {},
     poolSnapshots: {},
     updatedAt: new Date().toISOString(),
   };
@@ -26,6 +28,14 @@ export class StateStore {
           ? parsed.knownSignatures
           : [],
         jobs: Array.isArray(parsed.jobs) ? parsed.jobs : [],
+        depositHistoryByRef:
+          parsed.depositHistoryByRef && typeof parsed.depositHistoryByRef === 'object'
+            ? parsed.depositHistoryByRef
+            : {},
+        poolDepositOrder:
+          parsed.poolDepositOrder && typeof parsed.poolDepositOrder === 'object'
+            ? parsed.poolDepositOrder
+            : {},
         poolSnapshots:
           parsed.poolSnapshots && typeof parsed.poolSnapshots === 'object'
             ? parsed.poolSnapshots
