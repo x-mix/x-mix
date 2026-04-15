@@ -53,6 +53,12 @@ async function main(): Promise<void> {
   );
 
   let ticking = false;
+  let lastMerkleJobCount = -1;
+  let lastMerkleSummary = {
+    pools: 0,
+    matches: 0,
+    mismatches: 0,
+  };
 
   const tick = async () => {
     if (ticking) return;
@@ -60,8 +66,17 @@ async function main(): Promise<void> {
 
     try {
       const indexed = await indexDeposits(connection, config, state, logger);
-      const merkle = await rebuildMerkleSnapshots(state, logger);
       const processed = await processRelayQueue(connection, state, config, logger);
+
+      const shouldRebuildMerkle = indexed > 0 || state.jobs.length !== lastMerkleJobCount;
+      const merkle = shouldRebuildMerkle
+        ? await rebuildMerkleSnapshots(state, logger)
+        : lastMerkleSummary;
+
+      if (shouldRebuildMerkle) {
+        lastMerkleJobCount = state.jobs.length;
+        lastMerkleSummary = merkle;
+      }
 
       await store.save(state);
 
@@ -77,6 +92,7 @@ async function main(): Promise<void> {
           },
           trackedPools: Object.keys(state.poolSnapshots).length,
           merkle,
+          merkleRebuilt: shouldRebuildMerkle,
           lastSeenSlot: state.lastSeenSlot,
         },
         'relayer tick completed'

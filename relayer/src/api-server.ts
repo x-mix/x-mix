@@ -1,7 +1,8 @@
 import http, { IncomingMessage, ServerResponse } from 'node:http';
+import { PublicKey } from '@solana/web3.js';
 import { Logger } from 'pino';
 import { buildRelayRequestFromState } from './request-service.js';
-import { RelayerConfig, RelayerState } from './types.js';
+import { DepositJob, RelayerConfig, RelayerState } from './types.js';
 
 interface RelayRequestBuildBody {
   note?: {
@@ -73,6 +74,64 @@ function getQueueStats(state: RelayerState): {
   };
 }
 
+function sortDepositJobs(jobs: DepositJob[]): DepositJob[] {
+  return [...jobs].sort((a, b) => {
+    if (a.slot !== b.slot) return a.slot - b.slot;
+
+    const aIdx = a.deposit?.instructionIndex ?? 0;
+    const bIdx = b.deposit?.instructionIndex ?? 0;
+    if (aIdx !== bIdx) return aIdx - bIdx;
+
+    return a.signature.localeCompare(b.signature);
+  });
+}
+
+function getPoolCommitments(
+  state: RelayerState,
+  pool: string,
+  limit?: number
+): {
+  pool: string;
+  commitmentCount: number;
+  commitmentsHex: string[];
+  latestRootHex: string | null;
+  computedRootHex: string | null;
+  rootMatches: boolean | null;
+  lastSeenSlot: number;
+  stateUpdatedAt: string;
+} {
+  const poolJobs = state.jobs.filter((job) => job.deposit?.pool === pool);
+  const ordered = sortDepositJobs(poolJobs);
+  const all = ordered.map((job) => job.deposit!.commitmentHex);
+
+  const bounded =
+    typeof limit === 'number' && Number.isInteger(limit) && limit > 0 && all.length > limit
+      ? all.slice(all.length - limit)
+      : all;
+
+  const snapshot = state.poolSnapshots[pool];
+
+  return {
+    pool,
+    commitmentCount: all.length,
+    commitmentsHex: bounded,
+    latestRootHex: snapshot?.latestRootHex ?? null,
+    computedRootHex: snapshot?.computedRootHex ?? null,
+    rootMatches: snapshot?.rootMatches ?? null,
+    lastSeenSlot: state.lastSeenSlot,
+    stateUpdatedAt: state.updatedAt,
+  };
+}
+
+function parsePositiveInt(value: string | null): number | undefined {
+  if (value == null || value.trim() === '') return undefined;
+  const num = Number(value);
+  if (!Number.isInteger(num) || num <= 0) {
+    throw new Error('limit must be a positive integer');
+  }
+  return num;
+}
+
 export function startApiServer(
   state: RelayerState,
   config: RelayerConfig,
@@ -81,7 +140,9 @@ export function startApiServer(
   const server = http.createServer(async (req, res) => {
     try {
       const method = req.method ?? 'GET';
-      const url = req.url ?? '/';
+      const rawUrl = req.url ?? '/';
+      const parsedUrl = new URL(rawUrl, 'http://localhost');
+      const pathname = parsedUrl.pathname;
 
       if (method === 'OPTIONS') {
         setCors(res, config);
@@ -90,7 +151,7 @@ export function startApiServer(
         return;
       }
 
-      if (method === 'GET' && url === '/health') {
+      if (method === 'GET' && pathname === '/health') {
         writeJson(
           res,
           200,
@@ -106,7 +167,25 @@ export function startApiServer(
         return;
       }
 
-      if (method === 'POST' && url === '/api/relay-request/build') {
+      if (method === 'GET' && /^\/api\/pool\/[^/]+\/commitments$/.test(pathname)) {
+        const parts = pathname.split('/');
+        const pool = parts[3];
+
+        try {
+          new PublicKey(pool);
+        } catch {
+          writeJson(res, 400, { ok: false, error: 'invalid pool address' }, config);
+          return;
+        }
+
+        const limit = parsePositiveInt(parsedUrl.searchParams.get('limit'));
+        const result = getPoolCommitments(state, pool, limit);
+
+        writeJson(res, 200, { ok: true, result }, config);
+        return;
+      }
+
+      if (method === 'POST' && pathname === '/api/relay-request/build') {
         const body = (await readJsonBody(req)) as RelayRequestBuildBody;
 
         const note = body.note ?? {};

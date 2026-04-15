@@ -79,7 +79,7 @@ export function loadConfig(): RelayerConfig {
     apiHost: parseHost(process.env.RELAYER_API_HOST, '0.0.0.0'),
     apiPort: parseNumber(process.env.RELAYER_API_PORT, 8787),
     apiCorsOrigin: parseCorsOrigin(process.env.RELAYER_API_CORS_ORIGIN, '*'),
-    pollIntervalMs: parseNumber(process.env.POLL_INTERVAL_MS, 15_000),
+    pollIntervalMs: parseNumber(process.env.POLL_INTERVAL_MS, 4_000),
     maxSignatureScan: parseNumber(process.env.MAX_SIGNATURE_SCAN, 200),
     maxKnownSignatures: parseNumber(process.env.MAX_KNOWN_SIGNATURES, 5_000),
     maxRelayRetries: parseNumber(process.env.MAX_RELAY_RETRIES, 3),

@@ -30,7 +30,8 @@
     "relayer:dev": "cd relayer && npm run dev",
     "relayer:build": "cd relayer && npm run build",
     "relayer:typecheck": "cd relayer && npm run typecheck",
-    "relayer:request": "cd relayer && npm run request:build --"
+    "relayer:request": "cd relayer && npm run request:build --",
+    "emergency:withdraw": "node ./scripts/emergency-withdraw.mjs"
   },
   "devDependencies": {
     "@codama/nodes-from-anchor": "^1.0.0",
