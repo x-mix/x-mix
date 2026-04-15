@@ -82,6 +82,16 @@ export function addDepositHistoryEntry(state: RelayerState, entry: DepositHistor
   state.depositHistoryByRef[ref] = entry;
   const refs = state.poolDepositOrder[entry.pool] ?? [];
   refs.push(ref);
+  refs.sort((a, b) => {
+    const aEntry = state.depositHistoryByRef[a];
+    const bEntry = state.depositHistoryByRef[b];
+    if (!aEntry || !bEntry) return a.localeCompare(b);
+    if (aEntry.slot !== bEntry.slot) return aEntry.slot - bEntry.slot;
+    if (aEntry.instructionIndex !== bEntry.instructionIndex) {
+      return aEntry.instructionIndex - bEntry.instructionIndex;
+    }
+    return aEntry.signature.localeCompare(bEntry.signature);
+  });
   state.poolDepositOrder[entry.pool] = refs;
 }
 
@@ -121,7 +131,7 @@ export function listPoolDeposits(state: RelayerState, pool: string): DepositHist
     const entry = state.depositHistoryByRef[ref];
     if (entry) out.push(entry);
   }
-  return out;
+  return sortEntries(out);
 }
 
 export function compactQueueJobs(state: RelayerState, maxFailedJobsRetained: number): void {
