@@ -14,6 +14,9 @@ function toHistoryEntry(job: DepositJob): DepositHistoryEntry | null {
 function sortEntries(entries: DepositHistoryEntry[]): DepositHistoryEntry[] {
   return [...entries].sort((a, b) => {
     if (a.slot !== b.slot) return a.slot - b.slot;
+    const aTxIndex = Number.isInteger(a.txIndex) ? a.txIndex! : Number.MAX_SAFE_INTEGER;
+    const bTxIndex = Number.isInteger(b.txIndex) ? b.txIndex! : Number.MAX_SAFE_INTEGER;
+    if (aTxIndex !== bTxIndex) return aTxIndex - bTxIndex;
     if (a.instructionIndex !== b.instructionIndex) {
       return a.instructionIndex - b.instructionIndex;
     }
@@ -87,6 +90,13 @@ export function addDepositHistoryEntry(state: RelayerState, entry: DepositHistor
     const bEntry = state.depositHistoryByRef[b];
     if (!aEntry || !bEntry) return a.localeCompare(b);
     if (aEntry.slot !== bEntry.slot) return aEntry.slot - bEntry.slot;
+    const aTxIndex = Number.isInteger(aEntry.txIndex)
+      ? aEntry.txIndex!
+      : Number.MAX_SAFE_INTEGER;
+    const bTxIndex = Number.isInteger(bEntry.txIndex)
+      ? bEntry.txIndex!
+      : Number.MAX_SAFE_INTEGER;
+    if (aTxIndex !== bTxIndex) return aTxIndex - bTxIndex;
     if (aEntry.instructionIndex !== bEntry.instructionIndex) {
       return aEntry.instructionIndex - bEntry.instructionIndex;
     }

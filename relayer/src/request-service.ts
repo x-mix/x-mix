@@ -150,6 +150,12 @@ export async function buildRelayRequestFromState(
   const targetInstructionIndex = targetDeposit.instructionIndex;
   const pool = new PublicKey(targetDeposit.pool);
   const mint = new PublicKey(targetDeposit.mint);
+  const snapshot = state.poolSnapshots[targetDeposit.pool];
+  if (snapshot?.rootMatches === false) {
+    throw new Error(
+      `Relayer Merkle snapshot mismatch for pool ${targetDeposit.pool} (computed=${snapshot.computedRootHex ?? 'n/a'} latest=${snapshot.latestRootHex}); refusing request build`
+    );
+  }
 
   const poolJobs: DepositJob[] = listPoolDeposits(state, targetDeposit.pool).map((d) => ({
     signature: d.signature,

@@ -8,6 +8,7 @@ export interface DepositPayload {
   amount: string;
   commitmentHex: string;
   newRootHex: string;
+  txIndex?: number;
   instructionIndex: number;
 }
 

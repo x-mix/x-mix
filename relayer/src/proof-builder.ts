@@ -143,6 +143,13 @@ class PoseidonMerkleTree {
 function sortDepositJobs(jobs: DepositJob[]): DepositJob[] {
   return [...jobs].sort((a, b) => {
     if (a.slot !== b.slot) return a.slot - b.slot;
+    const aTxIndex = Number.isInteger(a.deposit?.txIndex)
+      ? (a.deposit?.txIndex as number)
+      : Number.MAX_SAFE_INTEGER;
+    const bTxIndex = Number.isInteger(b.deposit?.txIndex)
+      ? (b.deposit?.txIndex as number)
+      : Number.MAX_SAFE_INTEGER;
+    if (aTxIndex !== bTxIndex) return aTxIndex - bTxIndex;
 
     const aIdx = a.deposit?.instructionIndex ?? 0;
     const bIdx = b.deposit?.instructionIndex ?? 0;

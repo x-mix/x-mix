@@ -59,6 +59,43 @@ interface SignatureMeta {
   blockTime?: number | null;
 }
 
+interface TxPositionCacheEntry {
+  slot: number;
+  signatureToIndex: Map<string, number>;
+}
+
+async function resolveTxIndexInSlot(
+  connection: Connection,
+  slot: number,
+  signature: string,
+  cache: Map<number, TxPositionCacheEntry>
+): Promise<number | undefined> {
+  const cached = cache.get(slot);
+  if (cached) {
+    return cached.signatureToIndex.get(signature);
+  }
+
+  try {
+    const block = await connection.getBlock(slot, {
+      commitment: 'confirmed',
+      transactionDetails: 'signatures',
+      maxSupportedTransactionVersion: 0,
+      rewards: false,
+    });
+    const txSignatures =
+      ((block as unknown as { signatures?: string[] })?.signatures as string[] | undefined) ??
+      [];
+    const signatureToIndex = new Map<string, number>();
+    for (let i = 0; i < txSignatures.length; i += 1) {
+      signatureToIndex.set(txSignatures[i], i);
+    }
+    cache.set(slot, { slot, signatureToIndex });
+    return signatureToIndex.get(signature);
+  } catch {
+    return undefined;
+  }
+}
+
 async function indexSignature(
   connection: Connection,
   programId: PublicKey,
@@ -66,7 +103,8 @@ async function indexSignature(
   state: RelayerState,
   known: Set<string>,
   existingRefs: Set<string>,
-  logger: Logger
+  logger: Logger,
+  txPositionCache: Map<number, TxPositionCacheEntry>
 ): Promise<number> {
   if (known.has(sigMeta.signature)) {
     return 0;
@@ -89,6 +127,12 @@ async function indexSignature(
   const blockTime =
     sigMeta.blockTime !== undefined ? sigMeta.blockTime : (tx.blockTime ?? null);
   state.lastSeenSlot = Math.max(state.lastSeenSlot, slot);
+  const txIndex = await resolveTxIndexInSlot(
+    connection,
+    slot,
+    sigMeta.signature,
+    txPositionCache
+  );
 
   if (tx.meta?.err) {
     return 0;
@@ -109,7 +153,7 @@ async function indexSignature(
       continue;
     }
 
-    const decoded = decodeDepositInstruction(ix, i);
+    const decoded = decodeDepositInstruction(ix, i, txIndex);
     if (!decoded) {
       continue;
     }
@@ -149,6 +193,7 @@ async function indexSignature(
         signature: sigMeta.signature,
         depositKey,
         instructionIndex: decoded.instructionIndex,
+        txIndex: decoded.txIndex,
         slot,
         blockTime,
         pool: decoded.pool,
@@ -178,10 +223,11 @@ export async function indexDeposits(
     'confirmed'
   );
 
-  signatures.sort((a, b) => a.slot - b.slot);
+  const ordered = [...signatures].reverse();
 
   const known = new Set(state.knownSignatures);
   const existingRefs = getAllDepositRefs(state);
+  const txPositionCache = new Map<number, TxPositionCacheEntry>();
   for (const job of state.jobs) {
     if (!job.deposit) continue;
     existingRefs.add(getDepositJobKey(job));
@@ -189,7 +235,7 @@ export async function indexDeposits(
 
   let indexed = 0;
 
-  for (const sigInfo of signatures) {
+  for (const sigInfo of ordered) {
     // eslint-disable-next-line no-await-in-loop
     indexed += await indexSignature(
       connection,
@@ -202,7 +248,8 @@ export async function indexDeposits(
       state,
       known,
       existingRefs,
-      logger
+      logger,
+      txPositionCache
     );
   }
 
@@ -224,6 +271,7 @@ export async function indexDepositsBySignatures(
   const programId = new PublicKey(config.programId);
   const known = new Set(state.knownSignatures);
   const existingRefs = getAllDepositRefs(state);
+  const txPositionCache = new Map<number, TxPositionCacheEntry>();
 
   let indexed = 0;
   for (const signature of signatures) {
@@ -235,7 +283,8 @@ export async function indexDepositsBySignatures(
       state,
       known,
       existingRefs,
-      logger
+      logger,
+      txPositionCache
     );
   }
 

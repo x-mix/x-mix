@@ -14,7 +14,8 @@ function toHex(bytes: Uint8Array): string {
 
 export function decodeDepositInstruction(
   ix: PartiallyDecodedInstruction,
-  instructionIndex: number
+  instructionIndex: number,
+  txIndex?: number
 ): DepositPayload | null {
   if (ix.accounts.length < 4) {
     return null;
@@ -41,6 +42,7 @@ export function decodeDepositInstruction(
     amount: amount.toString(),
     commitmentHex: toHex(commitment),
     newRootHex: toHex(newRoot),
+    txIndex,
     instructionIndex,
   };
 }
