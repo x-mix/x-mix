@@ -172,6 +172,7 @@ export async function buildRelayRequestFromState(
       amount: d.amount,
       commitmentHex: d.commitmentHex,
       newRootHex: d.newRootHex,
+      txIndex: d.txIndex,
       instructionIndex: d.instructionIndex,
     },
   }));
