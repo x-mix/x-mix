@@ -247,7 +247,7 @@ async function main() {
       { pubkey: authority.publicKey, isSigner: true, isWritable: true },
       { pubkey: pool, isSigner: false, isWritable: true },
       { pubkey: vault, isSigner: false, isWritable: true },
-      { pubkey: vaultAta, isSigner: false, isWritable: false },
+      { pubkey: vaultAta, isSigner: false, isWritable: true },
       { pubkey: authorityTokenAccount, isSigner: false, isWritable: true },
       { pubkey: mint, isSigner: false, isWritable: true },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
