@@ -2,21 +2,25 @@
 import fs from 'fs';
 import path from 'path';
 import { createHash } from 'crypto';
-import {
-  ASSOCIATED_TOKEN_PROGRAM_ID,
+import web3 from '@solana/web3.js';
+
+const {
   Connection,
   Keypair,
   PublicKey,
   SystemProgram,
   Transaction,
   TransactionInstruction,
-} from '@solana/web3.js';
+} = web3;
 
 const DEFAULT_RPC_URL = 'https://api.mainnet-beta.solana.com';
 const DEFAULT_PROGRAM_ID = 'XmixQ4DB8MtKcEFhyjWs1gZtdaF3YDuF4ieGLJ3xotv';
 const WRAPPED_SOL_MINT = 'So11111111111111111111111111111111111111112';
 const TOKEN_PROGRAM_ID = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
 const TOKEN_2022_PROGRAM_ID = 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb';
+const ASSOCIATED_TOKEN_PROGRAM_ID = new PublicKey(
+  'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL'
+);
 const INIT_POOL_DISCRIMINATOR = createHash('sha256')
   .update('global:initialize_pool')
   .digest()
