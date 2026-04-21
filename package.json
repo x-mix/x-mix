@@ -31,6 +31,7 @@
     "relayer:build": "cd relayer && npm run build",
     "relayer:typecheck": "cd relayer && npm run typecheck",
     "relayer:request": "cd relayer && npm run request:build --",
+    "pool:init": "node ./scripts/init-pool.mjs",
     "emergency:withdraw": "node ./scripts/emergency-withdraw.mjs"
   },
   "devDependencies": {
