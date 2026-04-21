@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import {
+  ComputeBudgetProgram,
   Keypair,
   PublicKey,
   SendTransactionError,
@@ -23,6 +24,7 @@ const UPDATE_ROOT_HISTORY_DISCRIMINATOR = createHash('sha256')
   .update('global:update_root_history')
   .digest()
   .subarray(0, 8);
+const RELAY_TRANSFER_COMPUTE_UNITS = 400_000;
 
 function hexToBytes(hex: string, expectedLen: number): Buffer {
   const clean = hex.toLowerCase();
@@ -302,7 +304,12 @@ export async function executeTransfer(
         feePayer: relayer.publicKey,
         blockhash: latest.blockhash,
         lastValidBlockHeight: latest.lastValidBlockHeight,
-      }).add(instruction);
+      }).add(
+        ComputeBudgetProgram.setComputeUnitLimit({
+          units: RELAY_TRANSFER_COMPUTE_UNITS,
+        }),
+        instruction
+      );
 
       tx.sign(relayer);
 
