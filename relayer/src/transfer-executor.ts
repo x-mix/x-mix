@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import {
   Keypair,
   PublicKey,
@@ -18,6 +19,10 @@ const TOKEN_2022_PROGRAM_ID = new PublicKey(
   'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb'
 );
 const ASSOCIATED_TOKEN_PROGRAM_ID = new PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL');
+const UPDATE_ROOT_HISTORY_DISCRIMINATOR = createHash('sha256')
+  .update('global:update_root_history')
+  .digest()
+  .subarray(0, 8);
 
 function hexToBytes(hex: string, expectedLen: number): Buffer {
   const clean = hex.toLowerCase();
@@ -45,6 +50,17 @@ function isRetryableSendError(error: unknown): boolean {
     msg.includes('429') ||
     msg.includes('Node is behind')
   );
+}
+
+function hasUnknownRootLog(logs: readonly string[] | null | undefined): boolean {
+  if (!logs || logs.length === 0) return false;
+  return logs.some((line) => line.includes('UnknownRoot') || line.includes('Unknown merkle root'));
+}
+
+function isUnknownRootError(error: unknown, logs: readonly string[] | null | undefined): boolean {
+  if (hasUnknownRootLog(logs)) return true;
+  const msg = error instanceof Error ? error.message : String(error);
+  return msg.includes('UnknownRoot') || msg.includes('Unknown merkle root') || msg.includes('0x1771');
 }
 
 async function loadRelayerKeypair(path: string): Promise<Keypair> {
@@ -127,6 +143,55 @@ async function resolveTokenProgram(connection: Connection, mint: PublicKey): Pro
   throw new Error(
     `unsupported mint owner: ${info.owner.toBase58()} (mint=${mint.toBase58()})`
   );
+}
+
+function buildUpdateRootData(rootHex: string): Buffer {
+  const root = hexToBytes(rootHex, 32);
+  return Buffer.concat([UPDATE_ROOT_HISTORY_DISCRIMINATOR, root]);
+}
+
+async function updateRootHistory(
+  connection: Connection,
+  config: RelayerConfig,
+  relayer: Keypair,
+  pool: PublicKey,
+  rootHex: string
+): Promise<string> {
+  const ix = new TransactionInstruction({
+    programId: new PublicKey(config.programId),
+    keys: [
+      { pubkey: relayer.publicKey, isSigner: true, isWritable: true },
+      { pubkey: pool, isSigner: false, isWritable: true },
+    ],
+    data: buildUpdateRootData(rootHex),
+  });
+
+  const latest = await connection.getLatestBlockhash('confirmed');
+  const tx = new Transaction({
+    feePayer: relayer.publicKey,
+    blockhash: latest.blockhash,
+    lastValidBlockHeight: latest.lastValidBlockHeight,
+  }).add(ix);
+  tx.sign(relayer);
+
+  const sig = await connection.sendRawTransaction(tx.serialize(), {
+    skipPreflight: false,
+    maxRetries: 3,
+    preflightCommitment: 'confirmed',
+  });
+  const confirmation = await connection.confirmTransaction(
+    {
+      signature: sig,
+      blockhash: latest.blockhash,
+      lastValidBlockHeight: latest.lastValidBlockHeight,
+    },
+    'confirmed'
+  );
+  if (confirmation.value.err) {
+    throw new Error(`update_root_history failed: ${JSON.stringify(confirmation.value.err)}`);
+  }
+
+  return sig;
 }
 
 async function buildTransferInstruction(
@@ -225,6 +290,9 @@ export async function executeTransfer(
 
   const maxAttempts = Math.max(config.maxRelayRetries, 1);
   let lastError: unknown;
+  let attemptedRootSync = false;
+  const candidateRoot = request.input.publicInputsHex?.[0];
+  const poolForSync = new PublicKey(request.input.pool ?? fallback.pool);
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
@@ -260,13 +328,51 @@ export async function executeTransfer(
       return signature;
     } catch (error) {
       lastError = error;
+      let logs: string[] | undefined;
 
       if (error instanceof SendTransactionError) {
         try {
-          const logs = await error.getLogs(connection);
+          logs = await error.getLogs(connection);
           logger.error({ logs, attempt }, 'transfer transaction logs');
         } catch {
           // ignore log fetch failures
+        }
+      }
+
+      if (
+        !attemptedRootSync &&
+        candidateRoot &&
+        isUnknownRootError(error, logs)
+      ) {
+        attemptedRootSync = true;
+        try {
+          const updateSig = await updateRootHistory(
+            connection,
+            config,
+            relayer,
+            poolForSync,
+            candidateRoot
+          );
+          logger.warn(
+            {
+              requestId: request.requestId,
+              pool: poolForSync.toBase58(),
+              root: candidateRoot,
+              updateSig,
+            },
+            'UnknownRoot detected, updated root history and retrying transfer'
+          );
+          continue;
+        } catch (syncError) {
+          logger.error(
+            {
+              requestId: request.requestId,
+              pool: poolForSync.toBase58(),
+              root: candidateRoot,
+              error: syncError instanceof Error ? syncError.message : String(syncError),
+            },
+            'Failed to update root history before retrying transfer'
+          );
         }
       }
 
