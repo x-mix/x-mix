@@ -11,6 +11,12 @@ interface RelayRequestBuildBody {
     depositInstructionIndex?: number;
     secretHex?: string;
     nullifierHex?: string;
+    mint?: string;
+    pool?: string;
+    vault?: string;
+    vaultTokenAccount?: string;
+    recipientTokenAccount?: string;
+    feeCollectorTokenAccount?: string;
   };
   depositSignature?: string;
   depositInstructionIndex?: number;
@@ -229,6 +235,10 @@ export function startApiServer(
               depositInstructionIndex: result.request.depositInstructionIndex,
               pool: result.pool,
               mint: result.mint,
+              vault: result.request.vault,
+              vaultTokenAccount: result.request.vaultTokenAccount,
+              recipientTokenAccount: result.request.recipientTokenAccount,
+              feeCollectorTokenAccount: result.request.feeCollectorTokenAccount,
               leafIndex: result.leafIndex,
               depositAmountLamports: result.depositAmountLamports,
               relayerFeeLamports: result.request.relayerFeeLamports,

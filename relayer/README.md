@@ -138,6 +138,9 @@ One file per request in `REQUESTS_PATH`.
 
 Notes:
 - For SOL pool requests, leave token account fields empty.
+- For SPL token pools (e.g. USDC), request builder now auto-fills
+  `vaultTokenAccount` / `recipientTokenAccount` / `feeCollectorTokenAccount`
+  using the mint's actual token program owner.
 - Processed files are moved to `PROCESSED_REQUESTS_PATH`.
 - Permanently failed files are moved to `FAILED_REQUESTS_PATH`.
 

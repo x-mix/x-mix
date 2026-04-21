@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { PublicKey } from '@solana/web3.js';
 import { Logger } from 'pino';
 import { getRelayRequestKey } from './deposit-key.js';
 import { RelayerConfig, RelayRequest, RelayRequestInput } from './types.js';
@@ -8,6 +9,16 @@ function isHexOfLen(value: string, byteLen: number): boolean {
   if (typeof value !== 'string') return false;
   if (value.length !== byteLen * 2) return false;
   return /^[0-9a-fA-F]+$/.test(value);
+}
+
+function isValidPubkey(value: string | undefined): boolean {
+  if (!value) return false;
+  try {
+    new PublicKey(value);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function validateInput(input: RelayRequestInput): string | null {
@@ -32,6 +43,24 @@ function validateInput(input: RelayRequestInput): string | null {
   if (!/^\d+$/.test(input.relayerFeeLamports)) return 'invalid relayerFeeLamports';
   if (!/^\d+$/.test(input.recipientAmountLamports)) {
     return 'invalid recipientAmountLamports';
+  }
+  if (input.pool !== undefined && !isValidPubkey(input.pool)) return 'invalid pool';
+  if (input.mint !== undefined && !isValidPubkey(input.mint)) return 'invalid mint';
+  if (input.vault !== undefined && !isValidPubkey(input.vault)) return 'invalid vault';
+  if (input.vaultTokenAccount !== undefined && !isValidPubkey(input.vaultTokenAccount)) {
+    return 'invalid vaultTokenAccount';
+  }
+  if (
+    input.recipientTokenAccount !== undefined &&
+    !isValidPubkey(input.recipientTokenAccount)
+  ) {
+    return 'invalid recipientTokenAccount';
+  }
+  if (
+    input.feeCollectorTokenAccount !== undefined &&
+    !isValidPubkey(input.feeCollectorTokenAccount)
+  ) {
+    return 'invalid feeCollectorTokenAccount';
   }
   return null;
 }

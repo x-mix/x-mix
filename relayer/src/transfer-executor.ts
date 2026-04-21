@@ -14,6 +14,9 @@ import { RelayerConfig, RelayRequest } from './types.js';
 const TRANSFER_DISCRIMINATOR = Buffer.from([163, 52, 200, 231, 140, 3, 69, 186]);
 const WRAPPED_SOL_MINT = new PublicKey('So11111111111111111111111111111111111111112');
 const TOKEN_PROGRAM_ID = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
+const TOKEN_2022_PROGRAM_ID = new PublicKey(
+  'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb'
+);
 const ASSOCIATED_TOKEN_PROGRAM_ID = new PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL');
 
 function hexToBytes(hex: string, expectedLen: number): Buffer {
@@ -98,7 +101,36 @@ function optionalOrSentinel(address: string | undefined, sentinel: PublicKey): P
   return new PublicKey(address);
 }
 
-function buildTransferInstruction(
+function deriveAssociatedTokenAddress(
+  owner: PublicKey,
+  mint: PublicKey,
+  tokenProgram: PublicKey
+): PublicKey {
+  const [ata] = PublicKey.findProgramAddressSync(
+    [owner.toBuffer(), tokenProgram.toBuffer(), mint.toBuffer()],
+    ASSOCIATED_TOKEN_PROGRAM_ID
+  );
+  return ata;
+}
+
+async function resolveTokenProgram(connection: Connection, mint: PublicKey): Promise<PublicKey> {
+  const info = await connection.getAccountInfo(mint, 'confirmed');
+  if (!info) {
+    throw new Error(`mint not found: ${mint.toBase58()}`);
+  }
+  if (info.owner.equals(TOKEN_PROGRAM_ID)) {
+    return TOKEN_PROGRAM_ID;
+  }
+  if (info.owner.equals(TOKEN_2022_PROGRAM_ID)) {
+    return TOKEN_2022_PROGRAM_ID;
+  }
+  throw new Error(
+    `unsupported mint owner: ${info.owner.toBase58()} (mint=${mint.toBase58()})`
+  );
+}
+
+async function buildTransferInstruction(
+  connection: Connection,
   config: RelayerConfig,
   request: RelayRequest,
   relayerPubkey: PublicKey,
@@ -107,7 +139,7 @@ function buildTransferInstruction(
     mint: string;
     vault: string;
   }
-): TransactionInstruction {
+): Promise<TransactionInstruction> {
   const programId = new PublicKey(config.programId);
   const input = request.input;
 
@@ -122,17 +154,29 @@ function buildTransferInstruction(
 
   // For SOL pool, optional token accounts should remain sentinel.
   const useTokenAccounts = !mint.equals(WRAPPED_SOL_MINT);
+  const tokenProgram = useTokenAccounts
+    ? await resolveTokenProgram(connection, mint)
+    : TOKEN_PROGRAM_ID;
 
   const vaultTokenAccount = optionalOrSentinel(
-    useTokenAccounts ? input.vaultTokenAccount : undefined,
+    useTokenAccounts
+      ? input.vaultTokenAccount ??
+          deriveAssociatedTokenAddress(vault, mint, tokenProgram).toBase58()
+      : undefined,
     programId
   );
   const recipientTokenAccount = optionalOrSentinel(
-    useTokenAccounts ? input.recipientTokenAccount : undefined,
+    useTokenAccounts
+      ? input.recipientTokenAccount ??
+          deriveAssociatedTokenAddress(recipient, mint, tokenProgram).toBase58()
+      : undefined,
     programId
   );
   const feeCollectorTokenAccount = optionalOrSentinel(
-    useTokenAccounts ? input.feeCollectorTokenAccount : undefined,
+    useTokenAccounts
+      ? input.feeCollectorTokenAccount ??
+          deriveAssociatedTokenAddress(feeCollector, mint, tokenProgram).toBase58()
+      : undefined,
     programId
   );
 
@@ -148,7 +192,7 @@ function buildTransferInstruction(
     { pubkey: feeCollector, isSigner: false, isWritable: true },
     { pubkey: feeCollectorTokenAccount, isSigner: false, isWritable: true },
     { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
-    { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+    { pubkey: tokenProgram, isSigner: false, isWritable: false },
     { pubkey: ASSOCIATED_TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
   ];
 
@@ -171,7 +215,8 @@ export async function executeTransfer(
   logger: Logger
 ): Promise<string> {
   const relayer = await loadRelayerKeypair(config.relayerKeypairPath);
-  const instruction = buildTransferInstruction(
+  const instruction = await buildTransferInstruction(
+    connection,
     config,
     request,
     relayer.publicKey,

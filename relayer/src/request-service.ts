@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { Keypair, PublicKey } from '@solana/web3.js';
+import { Connection, Keypair, PublicKey } from '@solana/web3.js';
 import {
   ensureDepositHistory,
   findDepositByRef,
@@ -16,6 +16,14 @@ import {
   hexToBytes,
 } from './proof-builder.js';
 import { DepositJob, RelayRequestInput, RelayerConfig, RelayerState } from './types.js';
+const WRAPPED_SOL_MINT = new PublicKey('So11111111111111111111111111111111111111112');
+const TOKEN_PROGRAM_ID = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
+const TOKEN_2022_PROGRAM_ID = new PublicKey(
+  'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb'
+);
+const ASSOCIATED_TOKEN_PROGRAM_ID = new PublicKey(
+  'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL'
+);
 
 export interface BuildRelayRequestParams {
   state: RelayerState;
@@ -71,6 +79,37 @@ async function ensureFilePath(filePath: string, label: string): Promise<void> {
   }
 }
 
+function deriveAssociatedTokenAddress(
+  owner: PublicKey,
+  mint: PublicKey,
+  tokenProgram: PublicKey
+): PublicKey {
+  const [ata] = PublicKey.findProgramAddressSync(
+    [owner.toBuffer(), tokenProgram.toBuffer(), mint.toBuffer()],
+    ASSOCIATED_TOKEN_PROGRAM_ID
+  );
+  return ata;
+}
+
+async function resolveTokenProgramForMint(
+  connection: Connection,
+  mint: PublicKey
+): Promise<PublicKey> {
+  const info = await connection.getAccountInfo(mint, 'confirmed');
+  if (!info) {
+    throw new Error(`mint not found: ${mint.toBase58()}`);
+  }
+  if (info.owner.equals(TOKEN_PROGRAM_ID)) {
+    return TOKEN_PROGRAM_ID;
+  }
+  if (info.owner.equals(TOKEN_2022_PROGRAM_ID)) {
+    return TOKEN_2022_PROGRAM_ID;
+  }
+  throw new Error(
+    `unsupported mint owner: ${info.owner.toBase58()} (mint=${mint.toBase58()})`
+  );
+}
+
 export async function buildRelayRequestFromState(
   params: BuildRelayRequestParams
 ): Promise<BuildRelayRequestResult> {
@@ -110,6 +149,7 @@ export async function buildRelayRequestFromState(
 
   const targetInstructionIndex = targetDeposit.instructionIndex;
   const pool = new PublicKey(targetDeposit.pool);
+  const mint = new PublicKey(targetDeposit.mint);
 
   const poolJobs: DepositJob[] = listPoolDeposits(state, targetDeposit.pool).map((d) => ({
     signature: d.signature,
@@ -206,6 +246,27 @@ export async function buildRelayRequestFromState(
     mint: targetDeposit.mint,
     vault: targetDeposit.vault,
   };
+  if (!mint.equals(WRAPPED_SOL_MINT)) {
+    const connection = new Connection(config.rpcUrl, 'confirmed');
+    const tokenProgram = await resolveTokenProgramForMint(connection, mint);
+    const vaultPk = new PublicKey(targetDeposit.vault);
+    const feeCollectorPk = new PublicKey(config.feeCollector);
+    request.vaultTokenAccount = deriveAssociatedTokenAddress(
+      vaultPk,
+      mint,
+      tokenProgram
+    ).toBase58();
+    request.recipientTokenAccount = deriveAssociatedTokenAddress(
+      recipientPk,
+      mint,
+      tokenProgram
+    ).toBase58();
+    request.feeCollectorTokenAccount = deriveAssociatedTokenAddress(
+      feeCollectorPk,
+      mint,
+      tokenProgram
+    ).toBase58();
+  }
 
   const requestIdResolved =
     requestId ??
