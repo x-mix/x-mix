@@ -83,6 +83,7 @@ export function loadConfig(): RelayerConfig {
     fallbackPollEveryTicks: parseNumber(process.env.FALLBACK_POLL_EVERY_TICKS, 3),
     logSubscriptionEnabled: parseBoolean(process.env.LOG_SUBSCRIPTION_ENABLED, true),
     maxSignatureScan: parseNumber(process.env.MAX_SIGNATURE_SCAN, 200),
+    maxSignatureScanPages: parseNumber(process.env.MAX_SIGNATURE_SCAN_PAGES, 20),
     maxKnownSignatures: parseNumber(process.env.MAX_KNOWN_SIGNATURES, 5_000),
     maxRelayRetries: parseNumber(process.env.MAX_RELAY_RETRIES, 3),
     maxFailedJobsRetained: parseNumber(process.env.MAX_FAILED_JOBS_RETAINED, 200),

@@ -93,6 +93,7 @@ export interface RelayerConfig {
   fallbackPollEveryTicks: number;
   logSubscriptionEnabled: boolean;
   maxSignatureScan: number;
+  maxSignatureScanPages: number;
   maxKnownSignatures: number;
   maxRelayRetries: number;
   maxFailedJobsRetained: number;

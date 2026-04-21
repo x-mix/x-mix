@@ -64,6 +64,70 @@ interface TxPositionCacheEntry {
   signatureToIndex: Map<string, number>;
 }
 
+interface SignatureScanResult {
+  ordered: SignatureMeta[];
+  pagesFetched: number;
+  hitPageCap: boolean;
+}
+
+async function scanSignaturesForIndexing(
+  connection: Connection,
+  programId: PublicKey,
+  known: Set<string>,
+  config: RelayerConfig
+): Promise<SignatureScanResult> {
+  const collected: SignatureMeta[] = [];
+  let before: string | undefined;
+  let pagesFetched = 0;
+  let hitPageCap = false;
+
+  for (let page = 0; page < config.maxSignatureScanPages; page += 1) {
+    const signatures = await connection.getSignaturesForAddress(
+      programId,
+      {
+        limit: config.maxSignatureScan,
+        before,
+      },
+      'confirmed'
+    );
+    if (signatures.length === 0) {
+      break;
+    }
+
+    pagesFetched += 1;
+    for (const sig of signatures) {
+      collected.push({
+        signature: sig.signature,
+        slot: sig.slot,
+        blockTime: sig.blockTime ?? null,
+      });
+    }
+
+    const allKnown = signatures.every((sig) => known.has(sig.signature));
+    if (allKnown) {
+      break;
+    }
+
+    const pageFull = signatures.length === config.maxSignatureScan;
+    if (!pageFull) {
+      break;
+    }
+
+    if (page === config.maxSignatureScanPages - 1) {
+      hitPageCap = true;
+      break;
+    }
+
+    before = signatures[signatures.length - 1].signature;
+  }
+
+  return {
+    ordered: collected.reverse(),
+    pagesFetched,
+    hitPageCap,
+  };
+}
+
 async function resolveTxIndexInSlot(
   connection: Connection,
   slot: number,
@@ -217,15 +281,18 @@ export async function indexDeposits(
   ensureDepositHistory(state);
   const programId = new PublicKey(config.programId);
 
-  const signatures = await connection.getSignaturesForAddress(
-    programId,
-    { limit: config.maxSignatureScan },
-    'confirmed'
-  );
-
-  const ordered = [...signatures].reverse();
-
   const known = new Set(state.knownSignatures);
+  const scan = await scanSignaturesForIndexing(connection, programId, known, config);
+  if (scan.hitPageCap) {
+    logger.warn(
+      {
+        maxSignatureScan: config.maxSignatureScan,
+        maxSignatureScanPages: config.maxSignatureScanPages,
+        pagesFetched: scan.pagesFetched,
+      },
+      'Signature scan hit page cap; increase MAX_SIGNATURE_SCAN_PAGES for full backfill'
+    );
+  }
   const existingRefs = getAllDepositRefs(state);
   const txPositionCache = new Map<number, TxPositionCacheEntry>();
   for (const job of state.jobs) {
@@ -235,7 +302,7 @@ export async function indexDeposits(
 
   let indexed = 0;
 
-  for (const sigInfo of ordered) {
+  for (const sigInfo of scan.ordered) {
     // eslint-disable-next-line no-await-in-loop
     indexed += await indexSignature(
       connection,
