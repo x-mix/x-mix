@@ -79,6 +79,12 @@ export function loadConfig(): RelayerConfig {
     apiHost: parseHost(process.env.RELAYER_API_HOST, '0.0.0.0'),
     apiPort: parseNumber(process.env.RELAYER_API_PORT, 8787),
     apiCorsOrigin: parseCorsOrigin(process.env.RELAYER_API_CORS_ORIGIN, '*'),
+    apiBuildRetryAttempts: parseNumber(process.env.RELAYER_API_BUILD_RETRY_ATTEMPTS, 3),
+    apiBuildRetryDelayMs: parseNumber(process.env.RELAYER_API_BUILD_RETRY_DELAY_MS, 800),
+    apiBuildBatchConcurrency: parseNumber(
+      process.env.RELAYER_API_BUILD_BATCH_CONCURRENCY,
+      3
+    ),
     pollIntervalMs: parseNumber(process.env.POLL_INTERVAL_MS, 4_000),
     fallbackPollEveryTicks: parseNumber(process.env.FALLBACK_POLL_EVERY_TICKS, 3),
     logSubscriptionEnabled: parseBoolean(process.env.LOG_SUBSCRIPTION_ENABLED, true),

@@ -9,6 +9,7 @@ const SNARK_FIELD_SIZE = BigInt(
 );
 
 let poseidonInstance: Awaited<ReturnType<typeof buildPoseidon>> | null = null;
+let zeroTreePromise: Promise<Uint8Array[]> | null = null;
 
 function bytesToBigInt(bytes: Uint8Array): bigint {
   let result = 0n;
@@ -59,11 +60,16 @@ async function hashPoseidon(left: Uint8Array, right: Uint8Array): Promise<Uint8A
 }
 
 async function buildZeroTree(): Promise<Uint8Array[]> {
-  const zeros: Uint8Array[] = [new Uint8Array(32)];
-  for (let level = 1; level <= TREE_LEVELS; level++) {
-    zeros[level] = await hashPoseidon(zeros[level - 1], zeros[level - 1]);
+  if (!zeroTreePromise) {
+    zeroTreePromise = (async () => {
+      const zeros: Uint8Array[] = [new Uint8Array(32)];
+      for (let level = 1; level <= TREE_LEVELS; level++) {
+        zeros[level] = await hashPoseidon(zeros[level - 1], zeros[level - 1]);
+      }
+      return zeros;
+    })();
   }
-  return zeros;
+  return zeroTreePromise;
 }
 
 async function computeMerkleRoot(commitments: Uint8Array[]): Promise<Uint8Array> {
@@ -88,6 +94,51 @@ async function computeMerkleRoot(commitments: Uint8Array[]): Promise<Uint8Array>
   }
 
   return currentLevel[0];
+}
+
+export async function preparePoolRoots(
+  state: RelayerState,
+  pool: string,
+  pendingCommitmentsHex: string[]
+): Promise<{
+  pool: string;
+  baseCommitmentCount: number;
+  pendingCount: number;
+  rootsHex: string[];
+  latestRootHex: string | null;
+  computedRootHex: string | null;
+  rootMatches: boolean | null;
+  stateUpdatedAt: string;
+  lastSeenSlot: number;
+}> {
+  ensureDepositHistory(state);
+  const snapshot = state.poolSnapshots[pool];
+  const baseDeposits = listPoolDeposits(state, pool);
+  const workingCommitments = baseDeposits.map((d) => hexToBytes(d.commitmentHex));
+  const rootsHex: string[] = [];
+
+  for (const commitmentHexRaw of pendingCommitmentsHex) {
+    const commitmentHex = commitmentHexRaw.trim();
+    if (!/^[0-9a-fA-F]{64}$/.test(commitmentHex)) {
+      throw new Error(`invalid commitment hex: ${commitmentHexRaw}`);
+    }
+    workingCommitments.push(hexToBytes(commitmentHex.toLowerCase()));
+    // eslint-disable-next-line no-await-in-loop
+    const root = await computeMerkleRoot(workingCommitments);
+    rootsHex.push(bytesToHex(root));
+  }
+
+  return {
+    pool,
+    baseCommitmentCount: baseDeposits.length,
+    pendingCount: pendingCommitmentsHex.length,
+    rootsHex,
+    latestRootHex: snapshot?.latestRootHex ?? null,
+    computedRootHex: snapshot?.computedRootHex ?? null,
+    rootMatches: snapshot?.rootMatches ?? null,
+    stateUpdatedAt: state.updatedAt,
+    lastSeenSlot: state.lastSeenSlot,
+  };
 }
 
 export async function rebuildMerkleSnapshots(

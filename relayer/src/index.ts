@@ -48,7 +48,7 @@ async function main(): Promise<void> {
   }
 
   if (config.apiEnabled) {
-    apiServer = startApiServer(state, config, logger);
+    apiServer = startApiServer(state, config, logger, connection);
   }
 
   logger.info(
@@ -64,6 +64,9 @@ async function main(): Promise<void> {
             host: config.apiHost,
             port: config.apiPort,
             corsOrigin: config.apiCorsOrigin,
+            buildRetryAttempts: config.apiBuildRetryAttempts,
+            buildRetryDelayMs: config.apiBuildRetryDelayMs,
+            buildBatchConcurrency: config.apiBuildBatchConcurrency,
           }
         : null,
       existingJobs: state.jobs.length,

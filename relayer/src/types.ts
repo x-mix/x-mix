@@ -89,6 +89,9 @@ export interface RelayerConfig {
   apiHost: string;
   apiPort: number;
   apiCorsOrigin: string;
+  apiBuildRetryAttempts: number;
+  apiBuildRetryDelayMs: number;
+  apiBuildBatchConcurrency: number;
   pollIntervalMs: number;
   fallbackPollEveryTicks: number;
   logSubscriptionEnabled: boolean;
