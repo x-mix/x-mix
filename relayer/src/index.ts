@@ -11,6 +11,13 @@ import { rebuildMerkleSnapshots } from './merkle.js';
 import { StateStore } from './store.js';
 import { RelayerState } from './types.js';
 
+function createRpcConnection(rpcUrl: string): Connection {
+  return new Connection(rpcUrl, {
+    commitment: 'confirmed',
+    confirmTransactionInitialTimeout: 60_000,
+  });
+}
+
 async function main(): Promise<void> {
   const config = loadConfig();
 
@@ -18,10 +25,8 @@ async function main(): Promise<void> {
   new PublicKey(config.programId);
   new PublicKey(config.feeCollector);
 
-  const connection = new Connection(config.rpcUrl, {
-    commitment: 'confirmed',
-    confirmTransactionInitialTimeout: 60_000,
-  });
+  let activeRpcIndex = 0;
+  let connection = createRpcConnection(config.rpcUrls[activeRpcIndex]);
 
   const store = new StateStore(config.statePath);
   const state: RelayerState = await store.load();
@@ -33,7 +38,9 @@ async function main(): Promise<void> {
   let tickCount = 0;
 
   const programId = new PublicKey(config.programId);
-  if (config.logSubscriptionEnabled) {
+
+  const bindLogSubscription = () => {
+    if (!config.logSubscriptionEnabled) return;
     logSubscriptionId = connection.onLogs(
       programId,
       (event) => {
@@ -45,16 +52,56 @@ async function main(): Promise<void> {
       },
       'confirmed'
     );
-  }
+  };
+
+  const unbindLogSubscription = async () => {
+    if (logSubscriptionId === undefined) return;
+    try {
+      await connection.removeOnLogsListener(logSubscriptionId);
+    } catch {
+      // ignore
+    } finally {
+      logSubscriptionId = undefined;
+    }
+  };
+
+  const switchToNextRpc = async (reason: string): Promise<boolean> => {
+    if (config.rpcUrls.length <= 1) {
+      return false;
+    }
+    const previousUrl = config.rpcUrls[activeRpcIndex];
+    activeRpcIndex = (activeRpcIndex + 1) % config.rpcUrls.length;
+    const nextUrl = config.rpcUrls[activeRpcIndex];
+
+    await unbindLogSubscription();
+    connection = createRpcConnection(nextUrl);
+    bindLogSubscription();
+
+    logger.warn(
+      {
+        reason,
+        previousUrl,
+        nextUrl,
+        activeRpcIndex,
+        totalRpcUrls: config.rpcUrls.length,
+      },
+      'switched rpc endpoint'
+    );
+    return true;
+  };
+
+  bindLogSubscription();
 
   if (config.apiEnabled) {
-    apiServer = startApiServer(state, config, logger, connection);
+    apiServer = startApiServer(state, config, logger, () => connection);
   }
 
   logger.info(
     {
       programId: config.programId,
       rpcUrl: config.rpcUrl,
+      rpcUrls: config.rpcUrls,
+      activeRpcIndex,
       dryRun: config.dryRun,
       pollIntervalMs: config.pollIntervalMs,
       statePath: config.statePath,
@@ -147,10 +194,15 @@ async function main(): Promise<void> {
       );
       tickCount += 1;
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       logger.error(
         { error: error instanceof Error ? error.stack : String(error) },
         'relayer tick failed'
       );
+      const switched = await switchToNextRpc(`tick failed: ${message}`);
+      if (!switched) {
+        logger.warn('rpc failover unavailable (single endpoint configured)');
+      }
     } finally {
       ticking = false;
     }
@@ -170,13 +222,7 @@ async function main(): Promise<void> {
         apiServer?.close(() => resolve());
       });
     }
-    if (logSubscriptionId !== undefined) {
-      try {
-        await connection.removeOnLogsListener(logSubscriptionId);
-      } catch {
-        // ignore
-      }
-    }
+    await unbindLogSubscription();
 
     await store.save(state);
     process.exit(0);

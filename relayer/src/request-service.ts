@@ -28,6 +28,7 @@ const ASSOCIATED_TOKEN_PROGRAM_ID = new PublicKey(
 export interface BuildRelayRequestParams {
   state: RelayerState;
   config: RelayerConfig;
+  connection?: Connection;
   depositSignature: string;
   depositInstructionIndex?: number;
   recipient: string;
@@ -116,6 +117,7 @@ export async function buildRelayRequestFromState(
   const {
     state,
     config,
+    connection,
     depositSignature,
     depositInstructionIndex,
     recipient,
@@ -254,8 +256,8 @@ export async function buildRelayRequestFromState(
     vault: targetDeposit.vault,
   };
   if (!mint.equals(WRAPPED_SOL_MINT)) {
-    const connection = new Connection(config.rpcUrl, 'confirmed');
-    const tokenProgram = await resolveTokenProgramForMint(connection, mint);
+    const rpcConnection = connection ?? new Connection(config.rpcUrl, 'confirmed');
+    const tokenProgram = await resolveTokenProgramForMint(rpcConnection, mint);
     const vaultPk = new PublicKey(targetDeposit.vault);
     const feeCollectorPk = new PublicKey(config.feeCollector);
     request.vaultTokenAccount = deriveAssociatedTokenAddress(

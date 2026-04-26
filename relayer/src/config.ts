@@ -25,11 +25,23 @@ function parseCorsOrigin(value: string | undefined, fallback: string): string {
   return origin;
 }
 
+function parseRpcUrls(singleRpcUrl: string | undefined, rpcUrlsRaw: string | undefined): string[] {
+  const fromList = (rpcUrlsRaw ?? '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+
+  const fallbackSingle = singleRpcUrl?.trim() ?? '';
+  const all = fromList.length > 0 ? fromList : fallbackSingle ? [fallbackSingle] : [];
+  return Array.from(new Set(all));
+}
+
 export function loadConfig(): RelayerConfig {
-  const rpcUrl = process.env.RPC_URL?.trim();
-  if (!rpcUrl) {
-    throw new Error('Missing RPC_URL');
+  const rpcUrls = parseRpcUrls(process.env.RPC_URL, process.env.RPC_URLS);
+  if (rpcUrls.length === 0) {
+    throw new Error('Missing RPC_URL (or RPC_URLS)');
   }
+  const rpcUrl = rpcUrls[0];
 
   const programId =
     process.env.PROGRAM_ID?.trim() || 'XmixQ4DB8MtKcEFhyjWs1gZtdaF3YDuF4ieGLJ3xotv';
@@ -67,6 +79,7 @@ export function loadConfig(): RelayerConfig {
 
   return {
     rpcUrl,
+    rpcUrls,
     programId,
     relayerKeypairPath,
     feeCollector,

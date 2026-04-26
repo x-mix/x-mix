@@ -77,6 +77,7 @@ export interface RelayerState {
 
 export interface RelayerConfig {
   rpcUrl: string;
+  rpcUrls: string[];
   programId: string;
   relayerKeypairPath: string;
   feeCollector: string;

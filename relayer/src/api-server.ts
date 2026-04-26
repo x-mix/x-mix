@@ -161,9 +161,18 @@ function sleep(ms: number): Promise<void> {
 }
 
 function isRetryableBuildError(message: string): boolean {
+  const lower = message.toLowerCase();
   return (
     message.includes('Deposit not found in relayer state') ||
-    message.includes('missing decoded deposit payload')
+    message.includes('missing decoded deposit payload') ||
+    lower.includes('fetch failed') ||
+    lower.includes('timed out') ||
+    lower.includes('timeout') ||
+    lower.includes('429') ||
+    lower.includes('503') ||
+    lower.includes('econnreset') ||
+    lower.includes('econnrefused') ||
+    lower.includes('enotfound')
   );
 }
 
@@ -237,7 +246,7 @@ async function buildRelayRequestWithRetry(
   state: RelayerState,
   config: RelayerConfig,
   logger: Logger,
-  connection: Connection,
+  getConnection: () => Connection,
   input: NormalizedBuildInput
 ): Promise<BuildWithRetryResult> {
   const totalAttempts = Math.max(1, config.apiBuildRetryAttempts);
@@ -252,6 +261,7 @@ async function buildRelayRequestWithRetry(
       result = await buildRelayRequestFromState({
         state,
         config,
+        connection: getConnection(),
         depositSignature: input.depositSignature,
         depositInstructionIndex: input.depositInstructionIndex,
         recipient: input.recipient,
@@ -271,9 +281,13 @@ async function buildRelayRequestWithRetry(
         break;
       }
 
-      const indexed = await indexDepositsBySignatures(connection, config, state, logger, [
-        input.depositSignature,
-      ]);
+      const indexed = await indexDepositsBySignatures(
+        getConnection(),
+        config,
+        state,
+        logger,
+        [input.depositSignature]
+      );
       indexedOnDemand += indexed;
 
       logger.warn(
@@ -335,7 +349,7 @@ export function startApiServer(
   state: RelayerState,
   config: RelayerConfig,
   logger: Logger,
-  connection: Connection
+  getConnection: () => Connection
 ): http.Server {
   const server = http.createServer(async (req, res) => {
     try {
@@ -453,7 +467,13 @@ export function startApiServer(
           );
           return;
         }
-        const built = await buildRelayRequestWithRetry(state, config, logger, connection, input);
+        const built = await buildRelayRequestWithRetry(
+          state,
+          config,
+          logger,
+          getConnection,
+          input
+        );
 
         writeJson(
           res,
@@ -535,7 +555,7 @@ export function startApiServer(
         if (preloadSignatures.length > 0) {
           try {
             const indexed = await indexDepositsBySignatures(
-              connection,
+              getConnection(),
               config,
               state,
               logger,
@@ -581,7 +601,7 @@ export function startApiServer(
                 state,
                 config,
                 logger,
-                connection,
+                getConnection,
                 input
               );
 
